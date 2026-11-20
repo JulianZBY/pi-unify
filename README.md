@@ -54,6 +54,11 @@ Agent dir = `$PI_CODING_AGENT_DIR`, default `~/.pi/agent`.
     unify/<plugin>.json           # adapter descriptors you drop in yourself
 ```
 
+Shipped descriptors use `<plugin>.adapter.json`, because a bare `<plugin>.json` in a
+checked-out repo gets picked up by some plugins as their project config (pi-lens
+does exactly that with `pi-lens.json`). Yours are matched on their `name` field, so
+either name works, but prefer `<plugin>.adapter.json`.
+
 Project overrides live in the repository:
 
 ```
