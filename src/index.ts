@@ -4,6 +4,7 @@ import "./probe.ts";
 import { join } from "node:path";
 import { loadAdapters } from "./adapters.ts";
 import { diagnose } from "./diagnose.ts";
+import { eject } from "./eject.ts";
 import { installIntercept } from "./fs-intercept.ts";
 import { migrate } from "./migrate.ts";
 import { agentDir } from "./paths.ts";
@@ -65,6 +66,19 @@ export default function piUnify(pi: ExtensionAPI): void {
     description: "Back up and move one plugin's old config and data into the unified layout",
     handler: async (args, ctx) => {
       const result = migrate(args, { agentDir: ad, adapters });
+      ctx.ui.notify(result.message, result.ok ? "info" : "error");
+    },
+  });
+
+  pi.registerCommand("unify:eject", {
+    description: "Move one plugin's config and data back to the old layout and forget its migration",
+    handler: async (args, ctx) => {
+      const result = eject(args, {
+        agentDir: ad,
+        adapters,
+        cwd: ctx.cwd,
+        projectTrusted: ctx.isProjectTrusted(),
+      });
       ctx.ui.notify(result.message, result.ok ? "info" : "error");
     },
   });
