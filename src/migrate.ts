@@ -5,9 +5,10 @@ import { dataTargets } from "./data-dir.ts";
 import { withBypass } from "./fs-intercept.ts";
 import { backupDir, expandPath, settingsDir } from "./paths.ts";
 import { readState, writeState } from "./state.ts";
+import { movePath } from "./transfer.ts";
 import type { MigrationRecord } from "./state.ts";
 
-export const MIGRATE_USAGE = "usage: /unify:migrate <plugin-name>";
+export const MIGRATE_USAGE = "usage: /unify:migrate [plugin-name] — no name migrates every adapter";
 
 export interface MigrateOptions {
   agentDir: string;
@@ -30,6 +31,29 @@ export interface MigrateResult {
 export function migrate(name: string, opts: MigrateOptions): MigrateResult {
   // Migration moves its own files: it must see the real disk, never the redirect.
   return withBypass(() => runMigrate(name, opts));
+}
+
+// `/unify:migrate` with no argument: adopt every adapter, skipping the ones that
+// are already adopted. One failing plugin must not stop the rest.
+export function migrateAll(opts: MigrateOptions): MigrateResult {
+  return withBypass(() => {
+    const results = opts.adapters.map((adapter) => ({ name: adapter.name, result: runMigrate(adapter.name, opts) }));
+    const migrated = results.filter((r) => r.result.ok && r.result.moved.length > 0);
+    const already = results.filter((r) => r.result.ok && r.result.moved.length === 0);
+    const failed = results.filter((r) => !r.result.ok);
+    const lines = [
+      `pi-unify: migrate all — ${migrated.length} migrated, ${already.length} already migrated, ${failed.length} failed`,
+      ...migrated.map((r) => `  ${r.name}: migrated`),
+      ...already.map((r) => `  ${r.name}: ${r.result.message.replace(/^pi-unify: /, "")}`),
+      ...failed.map((r) => `  ${r.name}: FAILED — ${r.result.message.replace(/^pi-unify: /, "")}`),
+    ];
+    return {
+      ok: failed.length === 0,
+      message: lines.join("\n"),
+      backedUp: results.flatMap((r) => r.result.backedUp),
+      moved: results.flatMap((r) => r.result.moved),
+    };
+  });
 }
 
 function runMigrate(name: string, opts: MigrateOptions): MigrateResult {
@@ -103,7 +127,7 @@ function runMigrate(name: string, opts: MigrateOptions): MigrateResult {
         if (prev && incoming) fs.writeFileSync(configTo, JSON.stringify({ ...prev, ...incoming }) + "\n");
         else fs.copyFileSync(configFrom, configTo);
       } else {
-        fs.renameSync(configFrom, configTo);
+        movePath(configFrom, configTo);
       }
       fs.rmSync(configFrom, { force: true });
       moved.push(configTo);
@@ -180,7 +204,7 @@ function mergeDir(from: string, to: string, onCollision?: (dest: string) => void
       onCollision?.(dest);
       fs.rmSync(dest, { recursive: true, force: true });
     }
-    fs.renameSync(src, dest);
+    movePath(src, dest);
   }
 }
 

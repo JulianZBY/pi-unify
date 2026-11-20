@@ -4,6 +4,7 @@ import type { Adapter } from "./adapters.ts";
 import { configLayers, readConfig } from "./config.ts";
 import { withBypass } from "./fs-intercept.ts";
 import { backupDir } from "./paths.ts";
+import { movePath } from "./transfer.ts";
 import { readState, writeState } from "./state.ts";
 
 // Pinned at module load, before the intercept is installed (index.ts imports this
@@ -13,11 +14,10 @@ const rawStatSync: typeof fsDefault.statSync = fsDefault.statSync;
 const rawReaddirSync: typeof fsDefault.readdirSync = fsDefault.readdirSync;
 const rawMkdirSync: typeof fsDefault.mkdirSync = fsDefault.mkdirSync;
 const rawCopyFileSync: typeof fsDefault.copyFileSync = fsDefault.copyFileSync;
-const rawRenameSync: typeof fsDefault.renameSync = fsDefault.renameSync;
 const rawRmSync: typeof fsDefault.rmSync = fsDefault.rmSync;
 const rawWriteFileSync: typeof fsDefault.writeFileSync = fsDefault.writeFileSync;
 
-export const EJECT_USAGE = "usage: /unify:eject <plugin-name>";
+export const EJECT_USAGE = "usage: /unify:eject [plugin-name] — no name ejects every migrated plugin";
 
 export interface EjectOptions {
   agentDir: string;
@@ -44,6 +44,30 @@ export interface EjectResult {
 export function eject(name: string, opts: EjectOptions): EjectResult {
   // Like migrate: restore real files, not the redirected view.
   return withBypass(() => runEject(name, opts));
+}
+
+// `/unify:eject` with no argument: reverse every plugin that is currently migrated.
+export function ejectAll(opts: EjectOptions): EjectResult {
+  return withBypass(() => {
+    const migrated = Object.keys(readState(opts.agentDir).migrations);
+    if (migrated.length === 0) {
+      return { ok: true, message: "pi-unify: nothing to eject, no plugin is migrated", restored: [], backedUp: [] };
+    }
+    const results = migrated.map((name) => ({ name, result: runEject(name, opts) }));
+    const restored = results.filter((r) => r.result.ok);
+    const failed = results.filter((r) => !r.result.ok);
+    const lines = [
+      `pi-unify: eject all — ${restored.length} restored, ${failed.length} failed`,
+      ...restored.map((r) => `  ${r.name}: restored`),
+      ...failed.map((r) => `  ${r.name}: FAILED — ${r.result.message.replace(/^pi-unify: /, "")}`),
+    ];
+    return {
+      ok: failed.length === 0,
+      message: lines.join("\n"),
+      restored: results.flatMap((r) => r.result.restored),
+      backedUp: results.flatMap((r) => r.result.backedUp),
+    };
+  });
 }
 
 function runEject(name: string, opts: EjectOptions): EjectResult {
@@ -199,7 +223,7 @@ function mergeDir(from: string, to: string, onCollision?: (dest: string) => void
       onCollision?.(dest);
       rawRmSync(dest, { recursive: true, force: true });
     }
-    rawRenameSync(src, dest);
+    movePath(src, dest);
   }
 }
 

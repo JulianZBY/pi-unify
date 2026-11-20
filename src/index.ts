@@ -4,9 +4,9 @@ import "./probe.ts";
 import { fileURLToPath } from "node:url";
 import { loadAdapters } from "./adapters.ts";
 import { diagnose } from "./diagnose.ts";
-import { eject } from "./eject.ts";
+import { eject, ejectAll } from "./eject.ts";
 import { installIntercept } from "./fs-intercept.ts";
-import { migrate } from "./migrate.ts";
+import { migrate, migrateAll } from "./migrate.ts";
 import { agentDir } from "./paths.ts";
 import { earlyReads, setSelfCheck, uninstallProbe } from "./probe.ts";
 import type { ExtensionAPI } from "./types.ts";
@@ -82,24 +82,22 @@ export default function piUnify(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("unify:migrate", {
-    description: "Back up and move one plugin's old config and data into the unified layout",
+    description: "Back up and move plugin config/data into the unified layout (no name = every adapter)",
     handler: async (args, ctx) => {
       notifyRejected(ctx);
-      const result = migrate(args, { agentDir: ad, adapters });
+      const plugin = args.trim();
+      const result = plugin ? migrate(plugin, { agentDir: ad, adapters }) : migrateAll({ agentDir: ad, adapters });
       ctx.ui.notify(result.message, result.ok ? "info" : "error");
     },
   });
 
   pi.registerCommand("unify:eject", {
-    description: "Move one plugin's config and data back to the old layout and forget its migration",
+    description: "Move config/data back to the old layout and forget the migration (no name = every plugin)",
     handler: async (args, ctx) => {
       notifyRejected(ctx);
-      const result = eject(args, {
-        agentDir: ad,
-        adapters,
-        cwd: ctx.cwd,
-        projectTrusted: ctx.isProjectTrusted(),
-      });
+      const plugin = args.trim();
+      const options = { agentDir: ad, adapters, cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted() };
+      const result = plugin ? eject(plugin, options) : ejectAll(options);
       ctx.ui.notify(result.message, result.ok ? "info" : "error");
     },
   });

@@ -213,12 +213,18 @@ test("a failing move returns ok:false instead of throwing", (t) => {
 });
 
 test("/unify:migrate command is registered and reports its result without throwing", async (t) => {
+  // Isolate HOME as well: shipped descriptors use literal ~ paths (pi-memory,
+  // pi-lens), so without this a "migrate all" would reach the real agent dir.
+  const beforeHome = process.env.HOME;
   const before = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-unify-migrate-cmd-"));
+  process.env.HOME = process.env.PI_CODING_AGENT_DIR;
   t.after(() => {
     rmSync(process.env.PI_CODING_AGENT_DIR as string, { recursive: true, force: true });
     if (before === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = before;
+    if (beforeHome === undefined) delete process.env.HOME;
+    else process.env.HOME = beforeHome;
   });
 
   const { default: piUnify } = await import("../src/index.ts");
@@ -233,10 +239,11 @@ test("/unify:migrate command is registered and reports its result without throwi
     isProjectTrusted: () => false,
     ui: { notify: (msg: string, type?: "info" | "warning" | "error") => seen.push([msg, type]) },
   };
+  // No plugin name (whitespace only) means "all adapters", not a usage error.
   await command.handler("  ", ctx);
   assert.equal(seen.length, 1);
-  assert.equal(seen[0][1], "error");
-  assert.match(seen[0][0], /usage/i);
+  assert.equal(seen[0][1], "info");
+  assert.match(seen[0][0], /migrate all — \d+ migrated, \d+ already migrated, 0 failed/);
 });
 
 // Regression: migration runs inside the same process as the intercept, so its own
@@ -328,4 +335,38 @@ test("a failed data move after a config move leaves a reversible record", (t) =>
   assert.ok(record, "migration record must exist so eject can reverse the partial move");
   assert.deepEqual(record.config, { from: sb.oldConfig, to: sb.newConfig });
   assert.deepEqual(record.data, [{ from: sb.oldData, to: sb.newData }]);
+});
+
+test("migrate all adopts every adapter in one call", async (t) => {
+  const sb = sandbox(t);
+  writeFileSync(sb.oldConfig, JSON.stringify({ keep: 1 }));
+  mkdirSync(sb.oldData, { recursive: true });
+  writeFileSync(join(sb.oldData, "cache.bin"), "data");
+  const second = { name: "pi-other", data: [] } as Adapter;
+  const secondOld = join(sb.ad, "other.json");
+  writeFileSync(secondOld, JSON.stringify({ x: 1 }));
+  second.config = { path: secondOld };
+
+  const { migrateAll } = await import("../src/migrate.ts");
+  const result = migrateAll({ agentDir: sb.ad, adapters: [sb.adapter, second] });
+
+  assert.equal(result.ok, true, result.message);
+  assert.match(result.message, /2 migrated/);
+  const state = readState(sb.ad);
+  assert.deepEqual(Object.keys(state.migrations).sort(), ["pi-demo", "pi-other"]);
+  assert.throws(() => fs.lstatSync(sb.oldConfig), /ENOENT/);
+  assert.throws(() => fs.lstatSync(secondOld), /ENOENT/);
+});
+
+test("migrate all is a no-op for plugins already adopted", async (t) => {
+  const sb = sandbox(t);
+  writeFileSync(sb.oldConfig, JSON.stringify({ keep: 1 }));
+  const { migrate, migrateAll } = await import("../src/migrate.ts");
+
+  assert.equal(migrate("pi-demo", { agentDir: sb.ad, adapters: [sb.adapter] }).ok, true);
+  const result = migrateAll({ agentDir: sb.ad, adapters: [sb.adapter] });
+
+  assert.equal(result.ok, true, result.message);
+  assert.match(result.message, /1 already migrated/);
+  assert.equal(fs.readFileSync(sb.newConfig, "utf8"), JSON.stringify({ keep: 1 }));
 });

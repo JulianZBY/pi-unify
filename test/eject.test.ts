@@ -217,12 +217,18 @@ test("a state record whose files are already gone clears the entry without throw
 });
 
 test("/unify:eject command is registered and reports its result without throwing", async (t) => {
+  // Isolate HOME as well: shipped descriptors use literal ~ paths (pi-memory,
+  // pi-lens), so without this a "migrate all" would reach the real agent dir.
+  const beforeHome = process.env.HOME;
   const before = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-unify-eject-cmd-"));
+  process.env.HOME = process.env.PI_CODING_AGENT_DIR;
   t.after(() => {
     rmSync(process.env.PI_CODING_AGENT_DIR as string, { recursive: true, force: true });
     if (before === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = before;
+    if (beforeHome === undefined) delete process.env.HOME;
+    else process.env.HOME = beforeHome;
   });
 
   const { default: piUnify } = await import("../src/index.ts");
@@ -237,10 +243,12 @@ test("/unify:eject command is registered and reports its result without throwing
     isProjectTrusted: () => false,
     ui: { notify: (msg: string, type?: "info" | "warning" | "error") => seen.push([msg, type]) },
   };
+  // No plugin name (whitespace only) means "all migrated plugins"; an empty agent
+  // dir therefore reports a no-op rather than a usage error.
   await command.handler("  ", ctx);
   assert.equal(seen.length, 1);
-  assert.equal(seen[0][1], "error");
-  assert.match(seen[0][0], /usage/i);
+  assert.equal(seen[0][1], "info");
+  assert.match(seen[0][0], /nothing to eject/i);
 });
 
 // Regression: eject wrote/merged over old-path files without keeping a copy.
@@ -282,4 +290,29 @@ test("eject still restores the recorded config when no adapter matches", (t) => 
   assert.deepEqual(JSON.parse(fs.readFileSync(sb.oldConfig, "utf8")), { a: 1 });
   assert.equal(fs.existsSync(sb.newConfig), false);
   assert.deepEqual(readState(sb.ad).migrations, {});
+});
+
+test("eject all restores every migrated plugin and skips the rest", async (t) => {
+  const sb = sandbox(t);
+  writeFileSync(sb.oldConfig, JSON.stringify({ keep: 1 }));
+  const untouched = { name: "pi-untouched", data: [] } as Adapter;
+  const { migrateAll } = await import("../src/migrate.ts");
+  const { ejectAll } = await import("../src/eject.ts");
+
+  assert.equal(migrateAll({ agentDir: sb.ad, adapters: [sb.adapter, untouched] }).ok, true);
+  const result = ejectAll({ agentDir: sb.ad, adapters: [sb.adapter, untouched] });
+
+  assert.equal(result.ok, true, result.message);
+  assert.match(result.message, /1 restored/);
+  assert.equal(fs.existsSync(sb.oldConfig), true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.oldConfig, "utf8")), { keep: 1 });
+  assert.deepEqual(readState(sb.ad).migrations, {});
+});
+
+test("eject all with nothing migrated reports a no-op", async (t) => {
+  const sb = sandbox(t);
+  const { ejectAll } = await import("../src/eject.ts");
+  const result = ejectAll({ agentDir: sb.ad, adapters: [sb.adapter] });
+  assert.equal(result.ok, true);
+  assert.match(result.message, /nothing to eject/i);
 });
