@@ -1,6 +1,6 @@
 # pi-unify — 统一 pi 插件的配置与数据目录
 
-Status: ready-for-agent
+Status: implemented
 
 ## Problem Statement
 
