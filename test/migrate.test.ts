@@ -266,3 +266,66 @@ test("migration works while the intercept is installed", async (t) => {
   assert.equal(fs.readFileSync(join(sb.newData, "cache.bin"), "utf8"), "data");
   assert.ok(readState(sb.ad).migrations["pi-demo"]);
 });
+
+// Regression: renaming the old file over an existing unified file used to erase
+// keys the unified file already had, and the erased copy was not backed up.
+test("migrating over an existing unified config keeps its keys and backs it up", (t) => {
+  const sb = sandbox(t);
+  mkdirSync(settingsDir(sb.ad), { recursive: true });
+  writeFileSync(sb.newConfig, JSON.stringify({ unifiedOnly: true, shared: "unified" }));
+  writeFileSync(sb.oldConfig, JSON.stringify({ fromOld: 1, shared: "old" }));
+
+  const result = migrate("pi-demo", opts(sb, fixedNow));
+  assert.equal(result.ok, true, result.message);
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.newConfig, "utf8")), {
+    unifiedOnly: true,
+    fromOld: 1,
+    shared: "old",
+  });
+
+  const backedUp = result.backedUp.map((p) => [p, fs.readFileSync(p, "utf8")] as const);
+  assert.ok(
+    backedUp.some(([, content]) => content.includes("unifiedOnly")),
+    `existing unified config not backed up: ${result.backedUp.join(", ")}`,
+  );
+});
+
+// Regression: mergeDir deleted a newer destination file without keeping a copy.
+test("migrating over an existing unified data file backs the destination up", (t) => {
+  const sb = sandbox(t);
+  mkdirSync(sb.oldData, { recursive: true });
+  writeFileSync(join(sb.oldData, "cache.txt"), "old");
+  mkdirSync(sb.newData, { recursive: true });
+  writeFileSync(join(sb.newData, "cache.txt"), "unified-newer");
+
+  const result = migrate("pi-demo", opts(sb, fixedNow));
+  assert.equal(result.ok, true, result.message);
+  assert.equal(fs.readFileSync(join(sb.newData, "cache.txt"), "utf8"), "old");
+
+  const backedUp = result.backedUp
+    .filter((p) => statSync(p).isFile())
+    .map((p) => [p, fs.readFileSync(p, "utf8")] as const);
+  assert.ok(
+    backedUp.some(([, content]) => content === "unified-newer"),
+    `existing unified data file not backed up: ${result.backedUp.join(", ")}`,
+  );
+});
+
+// Regression: a move that failed halfway left no state, so a retry said
+// "nothing to migrate" and eject had nothing to reverse.
+test("a failed data move after a config move leaves a reversible record", (t) => {
+  const sb = sandbox(t);
+  writeFileSync(sb.oldConfig, '{"a":1}');
+  mkdirSync(sb.oldData, { recursive: true });
+  writeFileSync(join(sb.oldData, "cache.txt"), "x");
+  // A regular file where the unified data dir must go makes the data move fail.
+  mkdirSync(join(sb.newData, ".."), { recursive: true });
+  writeFileSync(sb.newData, "not a directory");
+
+  const result = migrate("pi-demo", opts(sb, fixedNow));
+  assert.equal(result.ok, false);
+  const record = readState(sb.ad).migrations["pi-demo"];
+  assert.ok(record, "migration record must exist so eject can reverse the partial move");
+  assert.deepEqual(record.config, { from: sb.oldConfig, to: sb.newConfig });
+  assert.deepEqual(record.data, [{ from: sb.oldData, to: sb.newData }]);
+});

@@ -242,3 +242,44 @@ test("/unify:eject command is registered and reports its result without throwing
   assert.equal(seen[0][1], "error");
   assert.match(seen[0][0], /usage/i);
 });
+
+// Regression: eject wrote/merged over old-path files without keeping a copy.
+test("an existing old-path config is backed up before eject overwrites it", (t) => {
+  const sb = sandbox(t);
+  adopted(sb);
+  writeFileSync(sb.oldConfig, JSON.stringify({ manual: true }));
+
+  const result = eject("pi-demo", opts(sb));
+  assert.equal(result.ok, true, result.message);
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.oldConfig, "utf8")), { a: 1 });
+
+  const contents = result.backedUp.filter((p) => fs.statSync(p).isFile()).map((p) => fs.readFileSync(p, "utf8"));
+  assert.ok(contents.some((c) => c.includes("manual")), `old config not backed up: ${result.backedUp.join(", ")}`);
+});
+
+test("an existing old-path data file is backed up before eject overwrites it", (t) => {
+  const sb = sandbox(t);
+  adopted(sb);
+  mkdirSync(sb.oldData, { recursive: true });
+  writeFileSync(join(sb.oldData, "cache.txt"), "manual-old");
+
+  const result = eject("pi-demo", opts(sb));
+  assert.equal(result.ok, true, result.message);
+  assert.equal(fs.readFileSync(join(sb.oldData, "cache.txt"), "utf8"), "x");
+
+  const contents = result.backedUp.filter((p) => fs.statSync(p).isFile()).map((p) => fs.readFileSync(p, "utf8"));
+  assert.ok(contents.includes("manual-old"), `old data file not backed up: ${result.backedUp.join(", ")}`);
+});
+
+// Regression: with the adapter descriptor gone, eject reported "unknown adapter"
+// and left the unified config stranded instead of restoring the recorded path.
+test("eject still restores the recorded config when no adapter matches", (t) => {
+  const sb = sandbox(t);
+  adopted(sb);
+
+  const result = eject("pi-demo", { ...opts(sb), adapters: [] });
+  assert.equal(result.ok, true, result.message);
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.oldConfig, "utf8")), { a: 1 });
+  assert.equal(fs.existsSync(sb.newConfig), false);
+  assert.deepEqual(readState(sb.ad).migrations, {});
+});

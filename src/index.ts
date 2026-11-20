@@ -8,7 +8,7 @@ import { eject } from "./eject.ts";
 import { installIntercept } from "./fs-intercept.ts";
 import { migrate } from "./migrate.ts";
 import { agentDir } from "./paths.ts";
-import { earlyReads, setSelfCheck } from "./probe.ts";
+import { earlyReads, setSelfCheck, uninstallProbe } from "./probe.ts";
 import type { ExtensionAPI } from "./types.ts";
 import type { InterceptOptions } from "./types.ts";
 
@@ -24,6 +24,8 @@ function selfCheckMessage(hits: string[]): string {
 export default function piUnify(pi: ExtensionAPI): void {
   const ad = agentDir();
   const warnings: string[] = [];
+  let rejectedWrites = 0;
+  let notifiedRejected = 0;
   const { adapters, warnings: loadWarnings } = loadAdapters(ad, [join(import.meta.dirname, "../adapters")]);
   warnings.push(...loadWarnings);
   const options: InterceptOptions = {
@@ -31,11 +33,25 @@ export default function piUnify(pi: ExtensionAPI): void {
     adapters,
     cwd: process.cwd(),
     projectTrusted: false,
-    onWarn: (msg) => warnings.push(msg),
+    onWarn: (msg) => {
+      if (msg.startsWith("reject config write")) rejectedWrites += 1;
+      warnings.push(msg);
+    },
   };
   const intercept = installIntercept(options);
 
+  // Rejections are otherwise invisible; tell the user once per batch, not per write.
+  const notifyRejected = (ctx: { hasUI?: boolean; ui: { notify: (msg: string, type?: "warning") => void } }) => {
+    if (rejectedWrites === notifiedRejected || ctx.hasUI === false) return;
+    const count = rejectedWrites - notifiedRejected;
+    notifiedRejected = rejectedWrites;
+    ctx.ui.notify(`pi-unify: ${count} config write(s) rejected — run /unify for details`, "warning");
+  };
+
   const hits = earlyReads(adapters, ad);
+  // The probe only matters before the intercept exists; the recorded hits are
+  // kept in the self-check result, so drop the extra wrapper now.
+  uninstallProbe();
   setSelfCheck({ hits, ok: hits.length === 0 });
 
   pi.on("session_start", (_event, ctx) => {
@@ -43,6 +59,7 @@ export default function piUnify(pi: ExtensionAPI): void {
     // the intercept re-reads this flag per call, so no second patch is needed.
     options.projectTrusted = ctx.isProjectTrusted();
     options.cwd = ctx.cwd;
+    notifyRejected(ctx);
     if (!ctx.hasUI || hits.length === 0) return;
     ctx.ui.notify(selfCheckMessage(hits), "warning");
   });
@@ -50,6 +67,7 @@ export default function piUnify(pi: ExtensionAPI): void {
   pi.registerCommand("unify", {
     description: "Show pi-unify status",
     handler: async (_args, ctx) => {
+      notifyRejected(ctx);
       const lines = diagnose({
         agentDir: ad,
         cwd: ctx.cwd,
@@ -66,6 +84,7 @@ export default function piUnify(pi: ExtensionAPI): void {
   pi.registerCommand("unify:migrate", {
     description: "Back up and move one plugin's old config and data into the unified layout",
     handler: async (args, ctx) => {
+      notifyRejected(ctx);
       const result = migrate(args, { agentDir: ad, adapters });
       ctx.ui.notify(result.message, result.ok ? "info" : "error");
     },
@@ -74,6 +93,7 @@ export default function piUnify(pi: ExtensionAPI): void {
   pi.registerCommand("unify:eject", {
     description: "Move one plugin's config and data back to the old layout and forget its migration",
     handler: async (args, ctx) => {
+      notifyRejected(ctx);
       const result = eject(args, {
         agentDir: ad,
         adapters,

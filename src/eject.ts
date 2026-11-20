@@ -1,5 +1,5 @@
 import fsDefault from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import type { Adapter } from "./adapters.ts";
 import { configLayers, readConfig } from "./config.ts";
 import { withBypass } from "./fs-intercept.ts";
@@ -53,11 +53,11 @@ function runEject(name: string, opts: EjectOptions): EjectResult {
   const plugin = name.trim();
   if (plugin === "") return fail(`pi-unify: ${EJECT_USAGE}`);
   const adapter = opts.adapters.find((a) => a.name === plugin);
-  if (!adapter) return fail(`pi-unify: unknown adapter "${plugin}"; ${EJECT_USAGE}`);
 
   const ad = opts.agentDir;
   const state = readState(ad);
   const record = state.migrations[plugin];
+  if (!adapter && !record) return fail(`pi-unify: unknown adapter "${plugin}"; ${EJECT_USAGE}`);
   if (!record) {
     return { ok: true, message: `pi-unify: nothing to eject, ${plugin} is not migrated`, ...none };
   }
@@ -66,10 +66,16 @@ function runEject(name: string, opts: EjectOptions): EjectResult {
   // sees today, which is what it must still see after pi-unify is uninstalled.
   const configFrom = record.config?.from;
   const configTo = record.config?.to;
-  const layers = configLayers(
-    { agentDir: ad, cwd: opts.cwd ?? process.cwd(), projectTrusted: opts.projectTrusted ?? false },
-    adapter,
-  );
+  // Without the descriptor, fall back to the recorded unified file so the config
+  // is still restored rather than silently left behind.
+  const layers = adapter
+    ? configLayers(
+        { agentDir: ad, cwd: opts.cwd ?? process.cwd(), projectTrusted: opts.projectTrusted ?? false },
+        adapter,
+      )
+    : configTo !== undefined
+      ? { global: configTo }
+      : undefined;
   const merged = configFrom !== undefined && layers ? readConfig(layers)?.merged : undefined;
   const hasConfig = configFrom !== undefined && configTo !== undefined && merged !== undefined;
 
@@ -92,6 +98,12 @@ function runEject(name: string, opts: EjectOptions): EjectResult {
       mkdir(dirname(dest));
       rawCopyFileSync(configTo, dest);
       backedUp.push(dest);
+      // The old path may already hold a file we are about to overwrite.
+      if (isFile(configFrom)) {
+        const prev = join(root, "existing/config", basename(configFrom));
+        copyFile(configFrom, prev);
+        backedUp.push(prev);
+      }
     }
     for (const pair of dirs) {
       const dest = freshDir(join(root, "data", basename(pair.from)));
@@ -113,7 +125,11 @@ function runEject(name: string, opts: EjectOptions): EjectResult {
       restored.push(configFrom);
     }
     for (const pair of dirs) {
-      mergeDir(pair.to, pair.from);
+      mergeDir(pair.to, pair.from, (dest) => {
+        const prev = join(root, "existing/data", basename(pair.from), relative(pair.from, dest));
+        copyFile(dest, prev);
+        backedUp.push(prev);
+      });
       removeIfEmpty(pair.to);
       restored.push(pair.from);
     }
@@ -168,17 +184,21 @@ function copyDir(from: string, to: string): void {
 
 // Move the contents of `from` into `to`, merging trees present on both sides;
 // `from` itself is left for removeIfEmpty.
-function mergeDir(from: string, to: string): void {
+function mergeDir(from: string, to: string, onCollision?: (dest: string) => void): void {
   mkdir(to);
   for (const entry of rawReaddirSync(from, { withFileTypes: true })) {
     const src = join(from, entry.name);
     const dest = join(to, entry.name);
     if (entry.isDirectory() && isDir(dest)) {
-      mergeDir(src, dest);
+      mergeDir(src, dest, onCollision);
       removeIfEmpty(src);
       continue;
     }
-    if (rawExistsSync(dest)) rawRmSync(dest, { recursive: true, force: true });
+    if (rawExistsSync(dest)) {
+      // Keep the file we are about to replace; it is not ours.
+      onCollision?.(dest);
+      rawRmSync(dest, { recursive: true, force: true });
+    }
     rawRenameSync(src, dest);
   }
 }

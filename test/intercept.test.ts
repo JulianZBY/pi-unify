@@ -212,3 +212,81 @@ test("named ESM imports of node:fs are intercepted", async (t) => {
   assert.equal(await readNamedAsync(sb.oldConfig), '{"adopted":true}');
   assert.ok((await statNamedAsync(sb.oldConfig)).isFile());
 });
+
+// Regression: the project layer used to be computed once from the install-time
+// cwd, so session_start moving the cwd never changed which override was read.
+test("project override follows cwd and trust changes after install", (t) => {
+  const sb = sandbox(t);
+  const otherCwd = join(sb.cwd, "..", "project-b");
+  mkdirSync(otherCwd, { recursive: true });
+  const projectA = join(sb.cwd, ".pi/unify/demo.json");
+  const projectB = join(otherCwd, ".pi/unify/demo.json");
+  mkdirSync(join(projectA, ".."), { recursive: true });
+  mkdirSync(join(projectB, ".."), { recursive: true });
+  writeFileSync(projectA, JSON.stringify({ from: "a" }));
+  writeFileSync(projectB, JSON.stringify({ from: "b" }));
+
+  const options = {
+    agentDir: sb.ad,
+    adapters: [{ ...sb.adapter, config: { path: sb.oldConfig, projectOverride: "demo.json" } }],
+    cwd: sb.cwd,
+    projectTrusted: false,
+  };
+  const intercept = installIntercept(options);
+  t.after(() => intercept.uninstall());
+
+  options.projectTrusted = true;
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.oldConfig, "utf8")), { from: "a" });
+  options.cwd = otherCwd;
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.oldConfig, "utf8")), { from: "b" });
+});
+
+// Regression: uninstall restored functions captured at install time, clobbering
+// any patch another interceptor installed after ours.
+test("a foreign patch installed after ours survives our uninstall", (t) => {
+  const sb = sandbox(t);
+  const intercept = install(sb);
+  const ours = fs.readFileSync;
+  const foreign = ((...args: Parameters<typeof fs.readFileSync>) => (ours as Function)(...args)) as typeof fs.readFileSync;
+  fs.readFileSync = foreign;
+
+  intercept.uninstall();
+  assert.equal(fs.readFileSync, foreign);
+  fs.readFileSync = ours;
+  intercept.uninstall();
+});
+
+test("after uninstall none of the patched slots are ours", (t) => {
+  const sb = sandbox(t);
+  const before = {
+    readFileSync: fs.readFileSync,
+    existsSync: fs.existsSync,
+    statSync: fs.statSync,
+    writeFileSync: fs.writeFileSync,
+    mkdirSync: fs.mkdirSync,
+    readdirSync: fs.readdirSync,
+    rmSync: fs.rmSync,
+    promisesReadFile: fs.promises.readFile,
+    promisesStat: fs.promises.stat,
+    promisesWriteFile: fs.promises.writeFile,
+    promisesReaddir: fs.promises.readdir,
+    promisesMkdir: fs.promises.mkdir,
+    promisesRm: fs.promises.rm,
+  };
+  const intercept = install(sb);
+  intercept.uninstall();
+
+  assert.equal(fs.readFileSync, before.readFileSync);
+  assert.equal(fs.existsSync, before.existsSync);
+  assert.equal(fs.statSync, before.statSync);
+  assert.equal(fs.writeFileSync, before.writeFileSync);
+  assert.equal(fs.mkdirSync, before.mkdirSync);
+  assert.equal(fs.readdirSync, before.readdirSync);
+  assert.equal(fs.rmSync, before.rmSync);
+  assert.equal(fs.promises.readFile, before.promisesReadFile);
+  assert.equal(fs.promises.stat, before.promisesStat);
+  assert.equal(fs.promises.writeFile, before.promisesWriteFile);
+  assert.equal(fs.promises.readdir, before.promisesReaddir);
+  assert.equal(fs.promises.mkdir, before.promisesMkdir);
+  assert.equal(fs.promises.rm, before.promisesRm);
+});

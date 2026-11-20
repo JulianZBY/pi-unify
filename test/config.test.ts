@@ -227,3 +227,31 @@ test("trust granted after install takes effect without re-patching", (t) => {
   options.projectTrusted = true;
   assert.deepEqual(JSON.parse(fs.readFileSync(sb.oldConfig, "utf8")), { model: "project-model" });
 });
+
+// Regression: the write replaced the whole global file, so a write that only
+// touched some keys silently dropped every other key the file had.
+test("a write that omits existing keys keeps them", (t) => {
+  const sb = sandbox(t);
+  put(sb.globalConfig, { a: 1, b: 2 });
+  const warnings: string[] = [];
+  const intercept = install(sb, false, (m) => warnings.push(m));
+  t.after(() => intercept.uninstall());
+
+  fs.writeFileSync(sb.oldConfig, JSON.stringify({ a: 3 }));
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.globalConfig, "utf8")), { a: 3, b: 2 });
+  assert.deepEqual(warnings, []);
+});
+
+// An explicit empty object must not wipe a populated config; skip and warn.
+test("an empty-object write does not wipe a populated global config", (t) => {
+  const sb = sandbox(t);
+  put(sb.globalConfig, { a: 1, b: 2 });
+  const warnings: string[] = [];
+  const intercept = install(sb, false, (m) => warnings.push(m));
+  t.after(() => intercept.uninstall());
+
+  fs.writeFileSync(sb.oldConfig, "{}");
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.globalConfig, "utf8")), { a: 1, b: 2 });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /empty/i);
+});

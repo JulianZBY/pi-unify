@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import type { Adapter } from "./adapters.ts";
 import { dataTargets } from "./data-dir.ts";
 import { withBypass } from "./fs-intercept.ts";
@@ -69,6 +69,12 @@ function runMigrate(name: string, opts: MigrateOptions): MigrateResult {
       const dest = join(root, "config", basename(configFrom));
       copyFile(configFrom, dest);
       backedUp.push(dest);
+      // The unified file may already exist: keep the copy we are about to merge into.
+      if (fs.existsSync(configTo)) {
+        const prev = join(root, "existing/config", basename(configTo));
+        copyFile(configTo, prev);
+        backedUp.push(prev);
+      }
     }
     for (const target of dirs) {
       const dest = freshDir(join(root, "data", basename(target.old)));
@@ -79,26 +85,48 @@ function runMigrate(name: string, opts: MigrateOptions): MigrateResult {
     return fail(`pi-unify: backup of ${plugin} failed: ${(err as Error).message}`);
   }
 
-  const moved: string[] = [];
-  try {
-    if (hasConfig) {
-      mkdir(dirname(configTo));
-      fs.renameSync(configFrom, configTo);
-      moved.push(configTo);
-    }
-    for (const target of dirs) {
-      mergeDir(target.old, target.unified);
-      removeIfEmpty(target.old);
-      if (!moved.includes(target.unified)) moved.push(target.unified);
-    }
-  } catch (err) {
-    return fail(`pi-unify: migration of ${plugin} failed: ${(err as Error).message}; backup in ${root}`);
-  }
-
+  // Journal the move before touching anything: a crash or failure halfway must
+  // still leave eject a record of the intended from/to pairs.
   const record: MigrationRecord = { migratedAt: now.toISOString() };
   if (hasConfig) record.config = { from: configFrom, to: configTo };
   if (dirs.length > 0) record.data = dirs.map((target) => ({ from: target.old, to: target.unified }));
   writeState(ad, { migrations: { ...readState(ad).migrations, [plugin]: record } });
+
+  const moved: string[] = [];
+  try {
+    if (hasConfig) {
+      mkdir(dirname(configTo));
+      if (fs.existsSync(configTo)) {
+        // Never let the stale old file erase keys the unified file already has.
+        const prev = readJson(configTo);
+        const incoming = readJson(configFrom);
+        if (prev && incoming) fs.writeFileSync(configTo, JSON.stringify({ ...prev, ...incoming }) + "\n");
+        else fs.copyFileSync(configFrom, configTo);
+      } else {
+        fs.renameSync(configFrom, configTo);
+      }
+      fs.rmSync(configFrom, { force: true });
+      moved.push(configTo);
+    }
+    for (const target of dirs) {
+      mergeDir(target.old, target.unified, (dest) => {
+        const prev = join(root, "existing/data", basename(target.old), relative(target.old, dest));
+        copyFile(dest, prev);
+        backedUp.push(prev);
+      });
+      removeIfEmpty(target.old);
+      if (!moved.includes(target.unified)) moved.push(target.unified);
+    }
+  } catch (err) {
+    // Nothing moved: drop the journal entry so a retry is not told to eject.
+    // Anything moved keeps the record; eject can reverse the partial migration.
+    if (moved.length === 0) {
+      const migrations = { ...readState(ad).migrations };
+      delete migrations[plugin];
+      writeState(ad, { migrations });
+    }
+    return fail(`pi-unify: migration of ${plugin} failed: ${(err as Error).message}; backup in ${root}`);
+  }
 
   return {
     ok: true,
@@ -137,23 +165,37 @@ function copyDir(from: string, to: string): void {
 
 // Move the contents of `from` into `to`, merging directory trees that exist on
 // both sides; `from` itself is left for removeIfEmpty.
-function mergeDir(from: string, to: string): void {
+function mergeDir(from: string, to: string, onCollision?: (dest: string) => void): void {
   mkdir(to);
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
     const src = join(from, entry.name);
     const dest = join(to, entry.name);
     if (entry.isDirectory() && isDir(dest)) {
-      mergeDir(src, dest);
+      mergeDir(src, dest, onCollision);
       removeIfEmpty(src);
       continue;
     }
-    if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
+    if (fs.existsSync(dest)) {
+      // Back the destination up first: it may be newer than the old copy.
+      onCollision?.(dest);
+      fs.rmSync(dest, { recursive: true, force: true });
+    }
     fs.renameSync(src, dest);
   }
 }
 
 function removeIfEmpty(dir: string): void {
   if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+}
+
+function readJson(p: string): Record<string, unknown> | undefined {
+  try {
+    const raw: unknown = JSON.parse(fs.readFileSync(p, "utf8"));
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+    return raw as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
 }
 
 function isDir(p: string): boolean {

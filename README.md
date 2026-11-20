@@ -105,6 +105,15 @@ Notes on the table:
 - These descriptors use the `<agent>` token so relocating
   `$PI_CODING_AGENT_DIR` keeps matching the plugins that honor it.
 
+## Limits
+
+- Only `fs.*` and `fs.promises.*` are redirected. Callback-style
+  `fs.readFile(path, cb)` and `fs.readFile(path, opts, cb)` are not patched, so a
+  plugin that reads its config that way still sees the old path.
+- pi-fff's data lives in LMDB directories opened by a native addon, which bypasses
+  the in-process fs shim; migrating that data is best-effort and cannot be
+  transparently redirected.
+
 ## Not applicable
 
 - **ponytail** — no standalone config file; settings travel with the package.

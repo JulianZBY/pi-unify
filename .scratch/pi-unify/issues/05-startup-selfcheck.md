@@ -10,6 +10,10 @@
 - [ ] 命中时启动阶段产生用户可见告警
 - [ ] 自检结果数据可供诊断命令读取
 
+## Limits
+
+The self-check can only observe reads that happen after pi-unify loaded, so it catches "some plugin loaded before me", not "every plugin did".
+
 ## Answer
 
 Status: resolved. Implemented in new `src/probe.ts` (owned) plus a 23-line addition to
