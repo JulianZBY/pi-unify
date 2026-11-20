@@ -194,3 +194,27 @@ test("health reports a data dir that exists but is not a directory", (t) => {
     intercept.health().problems.join("; "),
   );
 });
+
+// Regression: an adapter can declare several data dirs (pi-fff declares two LMDB
+// dirs that both contain data.mdb). Mapping them all onto data/<plugin>/ made the
+// second one overwrite the first.
+test("two declared data dirs of one plugin stay distinct", (t) => {
+  const sb = sandbox(t);
+  const second = join(sb.ad, "history");
+  const adapter: Adapter = { name: "pi-fff", data: [sb.oldData, second] };
+  const intercept = install(sb, [adapter]);
+  t.after(() => intercept.uninstall());
+
+  writeFileSync(join(sb.ad, "memory.marker"), "");
+  mkdirSync(sb.oldData, { recursive: true });
+  mkdirSync(second, { recursive: true });
+  // Seed through the patch: writes go to the unified side.
+  fs.writeFileSync(join(sb.oldData, "data.mdb"), "frecency");
+  fs.writeFileSync(join(second, "data.mdb"), "history");
+
+  const root = join(sb.ad, "extensions/data/pi-fff");
+  assert.equal(fs.readFileSync(join(root, "memory/data.mdb"), "utf8"), "frecency");
+  assert.equal(fs.readFileSync(join(root, "history/data.mdb"), "utf8"), "history");
+  assert.equal(fs.readFileSync(join(sb.oldData, "data.mdb"), "utf8"), "frecency");
+  assert.equal(fs.readFileSync(join(second, "data.mdb"), "utf8"), "history");
+});

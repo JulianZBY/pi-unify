@@ -88,7 +88,7 @@ restart or `/reload`; there is no hot reload.
 | Plugin | Old config | Old data |
 | --- | --- | --- |
 | pi-caveman | `<agent>/caveman.json` | — |
-| pi-fff | `<agent>/pi-fff.json` | `<agent>/fff/frecency`, `<agent>/fff/history` |
+| pi-fff | `<agent>/pi-fff.json` | none — its LMDB dirs are opened by a native addon (see Limits) |
 | pi-web-search | `<agent>/web-search.json` | — |
 | pi-cc-extensions | `<agent>/pi-cc-extensions.json` | — |
 | pi-memory | — | `~/.pi/agent/memory` (`MEMORY.md`, `daily/`, `recovery/`, scratchpad) |
@@ -116,8 +116,8 @@ Notes on the table:
   `fs.readFile(path, cb)` and `fs.readFile(path, opts, cb)` are not patched, so a
   plugin that reads its config that way still sees the old path.
 - pi-fff's data lives in LMDB directories opened by a native addon, which bypasses
-  the in-process fs shim; migrating that data is best-effort and cannot be
-  transparently redirected.
+  the in-process fs shim entirely: the addon reopens and recreates the old path even
+  after a migration. Its descriptor therefore declares the config file only.
 
 ## Not applicable
 
@@ -149,7 +149,7 @@ warning, never fatal. Restart or `/reload` after adding one, then
 
 - Only `fs.*` and `fs.promises.*` are redirected. Callback-style calls
   (`fs.readFile(path, cb)`) and native addons (pi-fff's LMDB directories, opened
-  by a Rust binding) bypass the shim; pi-fff's data migration is best-effort.
+  by a Rust binding) bypass the shim.
 - Project overrides become active from pi-unify's own `session_start` handler
   onward. If another extension reads config earlier in startup, `/unify` reports
   `project override for <plugin> present at ... but not applied` — that is the

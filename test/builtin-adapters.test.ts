@@ -17,11 +17,9 @@ const SHIPPED = join(import.meta.dirname, "../adapters");
 // PI_CODING_AGENT_DIR keeps matching the plugins that honor it.
 const EXPECTED: Record<string, { config?: string; projectOverride?: string; data: string[] }> = {
   "pi-caveman": { config: "<agent>/caveman.json", projectOverride: "caveman.json", data: [] },
-  "pi-fff": {
-    config: "<agent>/pi-fff.json",
-    projectOverride: "pi-fff.json",
-    data: ["<agent>/fff/frecency", "<agent>/fff/history"],
-  },
+  // Config only: pi-fff's LMDB dirs are opened by a native addon, which ignores the
+  // in-process shim and recreates the old path (see README "Limits").
+  "pi-fff": { config: "<agent>/pi-fff.json", projectOverride: "pi-fff.json", data: [] },
   "pi-web-search": { config: "<agent>/web-search.json", projectOverride: "web-search.json", data: [] },
   "pi-cc-extensions": {
     config: "<agent>/pi-cc-extensions.json",

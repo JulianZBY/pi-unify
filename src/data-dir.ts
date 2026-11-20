@@ -1,5 +1,5 @@
 import fsDefault from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import type { Adapter } from "./adapters.ts";
 import { dataRoot, expandPath } from "./paths.ts";
 
@@ -22,11 +22,15 @@ export function dataTargets(agentDir: string, adapters: Adapter[]): DataTarget[]
   const targets: DataTarget[] = [];
   for (const adapter of adapters) {
     for (const dir of adapter.data) {
-      targets.push({
-        plugin: adapter.name,
-        old: resolve(expandPath(dir, agentDir)),
-        unified: join(dataRoot(agentDir), adapter.name),
-      });
+      const old = resolve(expandPath(dir, agentDir));
+      // One declared dir keeps the plain per-plugin folder; several would collide on
+      // their file names (pi-fff's two LMDB envs both hold data.mdb), so each gets a
+      // folder named after the old dir.
+      const unified =
+        adapter.data.length > 1
+          ? join(dataRoot(agentDir), adapter.name, basename(old))
+          : join(dataRoot(agentDir), adapter.name);
+      targets.push({ plugin: adapter.name, old, unified });
     }
   }
   return targets;
