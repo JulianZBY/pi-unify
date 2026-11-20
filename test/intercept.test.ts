@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installIntercept } from "../src/fs-intercept.ts";
 import type { Adapter } from "../src/adapters.ts";
+import { readNamed, readNamedAsync, statNamedAsync } from "./helpers/named-fs.ts";
 
 interface Sandbox {
   ad: string;
@@ -195,4 +196,19 @@ test("adapters without config add no whitelist entries", (t) => {
   t.after(() => intercept.uninstall());
   assert.equal(fs.readFileSync(plain, "utf8"), "untouched");
   assert.deepEqual(intercept.health().problems, []);
+});
+
+// Regression: plugins written with named ESM imports (`import { readFileSync }
+// from "node:fs"`) bind to the builtin's exports object, which is only refreshed by
+// syncBuiltinESMExports(). The helper module deliberately imports that way.
+test("named ESM imports of node:fs are intercepted", async (t) => {
+  const sb = sandbox(t);
+  mkdirSync(join(sb.ad, "extensions/settings"), { recursive: true });
+  writeFileSync(sb.newConfig, '{"adopted":true}');
+  const intercept = install(sb);
+  t.after(() => intercept.uninstall());
+
+  assert.equal(readNamed(sb.oldConfig), '{"adopted":true}');
+  assert.equal(await readNamedAsync(sb.oldConfig), '{"adopted":true}');
+  assert.ok((await statNamedAsync(sb.oldConfig)).isFile());
 });

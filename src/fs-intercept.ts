@@ -1,5 +1,6 @@
 import fsDefault from "node:fs";
 import { existsSync as rawExistsSync, mkdirSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { dirname } from "node:path";
 import { expandPath, settingsDir } from "./paths.ts";
 import type { Intercept, InterceptOptions } from "./types.ts";
@@ -89,7 +90,7 @@ export function installIntercept(opts: InterceptOptions): Intercept {
   };
 
   // Assign through the module objects so callers using `fs.x` / `fs.promises.x`
-  // observe the patch; named ESM imports keep their original bindings.
+  // observe the patch.
   fsDefault.readFileSync = patched.readFileSync;
   fsDefault.existsSync = patched.existsSync;
   fsDefault.statSync = patched.statSync;
@@ -97,6 +98,11 @@ export function installIntercept(opts: InterceptOptions): Intercept {
   fsDefault.promises.readFile = patched.promisesReadFile;
   fsDefault.promises.stat = patched.promisesStat;
   fsDefault.promises.writeFile = patched.promisesWriteFile;
+  // Named ESM imports (`import { readFileSync } from "node:fs"`) snapshot the
+  // builtin's exports at first instantiation, which happens long before an
+  // extension loads. Re-syncing is the only way those bindings see our patch —
+  // without it every plugin written with named imports bypasses interception.
+  syncBuiltinESMExports();
 
   let installed = true;
 
@@ -111,6 +117,7 @@ export function installIntercept(opts: InterceptOptions): Intercept {
       fsDefault.promises.readFile = original.promisesReadFile;
       fsDefault.promises.stat = original.promisesStat;
       fsDefault.promises.writeFile = original.promisesWriteFile;
+      syncBuiltinESMExports();
     },
     health() {
       if (!installed) return { patched: [], problems: ["intercept uninstalled"] };

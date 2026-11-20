@@ -76,3 +76,11 @@ Deviations later tickets MUST know:
    options refreshed at `session_start` — a later ticket must uninstall/reinstall (chain is
    safe) or add a re-resolve hook.
 8. `agentDir(env?)`'s optional argument is for tests only; production calls pass nothing.
+
+## Follow-up (integration)
+
+`syncBuiltinESMExports()` is called after patching and after uninstall, and
+`test/helpers/named-fs.ts` pins the behaviour. Without it, plugins that use named ESM
+imports (`import { readFileSync } from "node:fs"` — pi-fff, pi-web-search,
+pi-cc-extensions, pi-caveman all do) would silently bypass interception, because named
+imports bind to the builtin's export object, which is snapshotted at first instantiation.
