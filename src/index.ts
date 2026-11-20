@@ -3,9 +3,10 @@
 import "./probe.ts";
 import { join } from "node:path";
 import { loadAdapters } from "./adapters.ts";
+import { diagnose } from "./diagnose.ts";
 import { installIntercept } from "./fs-intercept.ts";
 import { agentDir } from "./paths.ts";
-import { earlyReads, selfCheck, setSelfCheck } from "./probe.ts";
+import { earlyReads, setSelfCheck } from "./probe.ts";
 import type { ExtensionAPI, InterceptOptions } from "./types.ts";
 
 function selfCheckMessage(hits: string[]): string {
@@ -46,13 +47,16 @@ export default function piUnify(pi: ExtensionAPI): void {
   pi.registerCommand("unify", {
     description: "Show pi-unify status",
     handler: async (_args, ctx) => {
-      const health = intercept.health();
-      const checked = selfCheck();
-      const summary = `pi-unify: ${adapters.length} adapter(s), ${health.patched.length} fs function(s) intercepted`;
-      const problems = [...health.problems, ...warnings];
-      const problemsPart = problems.length ? `; ${problems.length} problem(s)` : "";
-      const selfCheckPart = checked.ok ? "" : `; ${checked.hits.length} adopted config file(s) read before interception`;
-      ctx.ui.notify(`${summary}${problemsPart}${selfCheckPart}`, "info");
+      const lines = diagnose({
+        agentDir: ad,
+        cwd: ctx.cwd,
+        projectTrusted: ctx.isProjectTrusted(),
+        adapters,
+        warnings,
+        health: intercept.health(),
+      });
+      const selfCheckFailed = lines.some((line) => line.startsWith("self-check: WARNING"));
+      ctx.ui.notify(lines.join("\n"), selfCheckFailed ? "warning" : "info");
     },
   });
 }

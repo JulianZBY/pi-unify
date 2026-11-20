@@ -19,5 +19,8 @@ test("extension loads and registers a callable liveness command", async () => {
     isProjectTrusted: () => false,
     ui: { notify: (msg) => seen.push(msg) },
   });
-  assert.deepEqual(seen, ["pi-unify: 0 adapter(s), 13 fs function(s) intercepted"]);
+  assert.equal(seen.length, 1, "one multi-line notify");
+  assert.match(seen[0] as string, /^pi-unify: 0 adapter\(s\) loaded, 0 migrated$/m);
+  assert.match(seen[0] as string, /^interception: 13 fs function\(s\) patched/m);
+  assert.match(seen[0] as string, /^self-check: /m);
 });
