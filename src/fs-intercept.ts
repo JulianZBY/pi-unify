@@ -90,7 +90,7 @@ export function installIntercept(opts: InterceptOptions): Intercept {
       return read(raw, ...args);
     }
     const json = JSON.stringify(view.merged);
-    const requested = typeof args[0] === "string" ? args[0] : (args[0] as { encoding?: BufferEncoding } | undefined)?.encoding;
+    const requested = typeof args[0] === "string" ? args[0] : (args[0] as { encoding?: string } | undefined)?.encoding;
     return requested ? json : Buffer.from(json);
   };
 
