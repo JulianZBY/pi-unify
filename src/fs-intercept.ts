@@ -6,6 +6,19 @@ import { dataHealth, dataTargets, matchDataPath, parentDir, preferUnified, write
 import { expandPath, settingsDir } from "./paths.ts";
 import type { Intercept, InterceptOptions } from "./types.ts";
 
+// Our own admin code (migrate/eject/diagnostics) must see the real filesystem,
+// not the redirected view, or a migration ends up moving its own files twice.
+let bypassDepth = 0;
+
+export function withBypass<T>(fn: () => T): T {
+  bypassDepth += 1;
+  try {
+    return fn();
+  } finally {
+    bypassDepth -= 1;
+  }
+}
+
 // Path whitelist for exact absolute config paths -> its config layers.
 // Data-dir mapping is added by a later ticket; keep that decision here only.
 function buildTargets(opts: InterceptOptions): Map<string, ConfigLayers> {
@@ -40,6 +53,7 @@ export function installIntercept(opts: InterceptOptions): Intercept {
   // "not whitelisted": every patched function then calls the saved original.
   // Trust is read per call so a session_start update takes effect without re-patching.
   const resolveTarget = (p: unknown): ConfigLayers | undefined => {
+    if (bypassDepth > 0) return undefined;
     if (typeof p !== "string") return undefined;
     const layers = targets.get(p);
     if (!layers) return undefined;
@@ -65,7 +79,8 @@ export function installIntercept(opts: InterceptOptions): Intercept {
     return requested ? json : Buffer.from(json);
   };
 
-  const dataPath = (p: unknown) => (resolveTarget(p) ? undefined : matchDataPath(dataDirs, p));
+  const dataPath = (p: unknown) =>
+    bypassDepth > 0 || resolveTarget(p) ? undefined : matchDataPath(dataDirs, p);
   // Writes and directory creation always go to the unified side, creating the
   // parent dir; deletes follow the read side so an unmigrated old dir can still
   // be removed where it currently lives.

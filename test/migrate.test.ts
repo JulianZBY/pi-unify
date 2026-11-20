@@ -238,3 +238,31 @@ test("/unify:migrate command is registered and reports its result without throwi
   assert.equal(seen[0][1], "error");
   assert.match(seen[0][0], /usage/i);
 });
+
+// Regression: migration runs inside the same process as the intercept, so its own
+// fs calls were being redirected to the unified paths and the move corrupted itself.
+test("migration works while the intercept is installed", async (t) => {
+  const sb = sandbox(t);
+  writeFileSync(sb.oldConfig, JSON.stringify({ keep: 1 }));
+  mkdirSync(sb.oldData, { recursive: true });
+  writeFileSync(join(sb.oldData, "cache.bin"), "data");
+
+  const { installIntercept } = await import("../src/fs-intercept.ts");
+  const intercept = installIntercept({
+    agentDir: sb.ad,
+    adapters: [sb.adapter],
+    cwd: sb.cwd,
+    projectTrusted: false,
+  });
+  t.after(() => intercept.uninstall());
+
+  const result = migrate("pi-demo", { agentDir: sb.ad, adapters: [sb.adapter] });
+  assert.equal(result.ok, true, result.message);
+  // lstatSync is not intercepted, so it shows the real disk rather than the
+  // redirected view the old paths now resolve to.
+  assert.throws(() => fs.lstatSync(sb.oldConfig), /ENOENT/);
+  assert.throws(() => fs.lstatSync(sb.oldData), /ENOENT/);
+  assert.equal(fs.readFileSync(sb.newConfig, "utf8"), JSON.stringify({ keep: 1 }));
+  assert.equal(fs.readFileSync(join(sb.newData, "cache.bin"), "utf8"), "data");
+  assert.ok(readState(sb.ad).migrations["pi-demo"]);
+});

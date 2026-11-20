@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Adapter } from "./adapters.ts";
 import { dataTargets } from "./data-dir.ts";
+import { withBypass } from "./fs-intercept.ts";
 import { backupDir, expandPath, settingsDir } from "./paths.ts";
 import { readState, writeState } from "./state.ts";
 import type { MigrationRecord } from "./state.ts";
@@ -27,6 +28,11 @@ export interface MigrateResult {
 // One plugin per call: backup every old file, move it into the unified layout and
 // record what happened, so eject can reverse exactly this migration.
 export function migrate(name: string, opts: MigrateOptions): MigrateResult {
+  // Migration moves its own files: it must see the real disk, never the redirect.
+  return withBypass(() => runMigrate(name, opts));
+}
+
+function runMigrate(name: string, opts: MigrateOptions): MigrateResult {
   const none = { backedUp: [] as string[], moved: [] as string[] };
   const fail = (message: string): MigrateResult => ({ ok: false, message, ...none });
 

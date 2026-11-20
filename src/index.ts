@@ -9,7 +9,8 @@ import { installIntercept } from "./fs-intercept.ts";
 import { migrate } from "./migrate.ts";
 import { agentDir } from "./paths.ts";
 import { earlyReads, setSelfCheck } from "./probe.ts";
-import type { ExtensionAPI, InterceptOptions } from "./types.ts";
+import type { ExtensionAPI } from "./types.ts";
+import type { InterceptOptions } from "./types.ts";
 
 function selfCheckMessage(hits: string[]): string {
   return (

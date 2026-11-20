@@ -2,6 +2,7 @@ import fsDefault from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Adapter } from "./adapters.ts";
 import { configLayers, readConfig } from "./config.ts";
+import { withBypass } from "./fs-intercept.ts";
 import { backupDir } from "./paths.ts";
 import { readState, writeState } from "./state.ts";
 
@@ -41,6 +42,11 @@ export interface EjectResult {
 // data back to the old dirs, unified leftovers removed, state entry cleared.
 // Backups of both sides are kept; nothing here is ever deleted from the backup dir.
 export function eject(name: string, opts: EjectOptions): EjectResult {
+  // Like migrate: restore real files, not the redirected view.
+  return withBypass(() => runEject(name, opts));
+}
+
+function runEject(name: string, opts: EjectOptions): EjectResult {
   const none = { restored: [] as string[], backedUp: [] as string[] };
   const fail = (message: string): EjectResult => ({ ok: false, message, ...none });
 
