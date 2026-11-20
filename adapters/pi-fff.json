@@ -1,0 +1,5 @@
+{
+  "name": "pi-fff",
+  "config": { "path": "<agent>/pi-fff.json", "projectOverride": "pi-fff.json" },
+  "data": ["<agent>/fff/frecency", "<agent>/fff/history"]
+}

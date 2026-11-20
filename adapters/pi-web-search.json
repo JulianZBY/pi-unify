@@ -1,0 +1,4 @@
+{
+  "name": "pi-web-search",
+  "config": { "path": "<agent>/web-search.json", "projectOverride": "web-search.json" }
+}
