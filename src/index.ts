@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { loadAdapters } from "./adapters.ts";
 import { installIntercept } from "./fs-intercept.ts";
 import { agentDir } from "./paths.ts";
-import type { ExtensionAPI } from "./types.ts";
+import type { ExtensionAPI, InterceptOptions } from "./types.ts";
 
 // This package must load before the plugins it adopts (see README), so the
 // intercept is installed here in the factory rather than in session_start.
@@ -11,12 +11,19 @@ export default function piUnify(pi: ExtensionAPI): void {
   const warnings: string[] = [];
   const { adapters, warnings: loadWarnings } = loadAdapters(ad, [join(import.meta.dirname, "../adapters")]);
   warnings.push(...loadWarnings);
-  const intercept = installIntercept({
+  const options: InterceptOptions = {
     agentDir: ad,
     adapters,
     cwd: process.cwd(),
     projectTrusted: false,
     onWarn: (msg) => warnings.push(msg),
+  };
+  const intercept = installIntercept(options);
+
+  // Project overrides are only read once the host reports the project trusted;
+  // the intercept re-reads this flag per call, so no second patch is needed.
+  pi.on("session_start", (_event, ctx) => {
+    options.projectTrusted = ctx.isProjectTrusted();
   });
 
   pi.registerCommand("unify", {
