@@ -145,6 +145,18 @@ expanded absolute form, exact only. A malformed descriptor is skipped with a
 warning, never fatal. Restart or `/reload` after adding one, then
 `/unify:migrate my-plugin`.
 
+## Limits
+
+- Only `fs.*` and `fs.promises.*` are redirected. Callback-style calls
+  (`fs.readFile(path, cb)`) and native addons (pi-fff's LMDB directories, opened
+  by a Rust binding) bypass the shim; pi-fff's data migration is best-effort.
+- Project overrides become active from pi-unify's own `session_start` handler
+  onward. If another extension reads config earlier in startup, `/unify` reports
+  `project override for <plugin> present at ... but not applied` — that is the
+  load-order problem, and the fix is putting pi-unify first in `packages`.
+- The startup self-check can only observe reads that happen after pi-unify
+  loaded, so it catches "some plugin loaded before me", not "every plugin did".
+
 ## Out of scope (first version)
 
 - Unifying plugins' environment-variable configuration.

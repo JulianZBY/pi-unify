@@ -255,3 +255,25 @@ test("an empty-object write does not wipe a populated global config", (t) => {
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /empty/i);
 });
+
+// Regression: pi-unify refreshes trust/cwd from its own session_start handler, which
+// is not guaranteed to run before another extension reads config. A project override
+// that exists but is not applied must surface, not vanish silently.
+test("an existing project override that is not applied yet is reported", async (t) => {
+  const sb = sandbox(t);
+  put(sb.projectConfig, { fromProject: true });
+  put(sb.globalConfig, { fromGlobal: true });
+
+  const { installIntercept } = await import("../src/fs-intercept.ts");
+  const warnings: string[] = [];
+  const opts = { agentDir: sb.ad, adapters: [sb.adapter], cwd: sb.cwd, projectTrusted: false, onWarn: (m: string) => warnings.push(m) };
+  const intercept = installIntercept(opts);
+  t.after(() => intercept.uninstall());
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.oldConfig, "utf8")), { fromGlobal: true });
+  assert.equal(warnings.filter((w) => w.includes("not applied")).length, 1, warnings.join("; "));
+
+  opts.projectTrusted = true;
+  assert.deepEqual(JSON.parse(fs.readFileSync(sb.oldConfig, "utf8")), { fromGlobal: true, fromProject: true });
+  assert.equal(warnings.filter((w) => w.includes("not applied")).length, 1, "warns once per adapter");
+});

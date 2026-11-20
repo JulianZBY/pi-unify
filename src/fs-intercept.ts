@@ -1,6 +1,7 @@
 import fsDefault from "node:fs";
 import { existsSync as rawExistsSync, mkdirSync as rawMkdirSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
+import { join } from "node:path";
 import { configLayers, readConfig, writeConfig, type ConfigLayers } from "./config.ts";
 import { dataHealth, dataTargets, matchDataPath, parentDir, preferUnified, writePath } from "./data-dir.ts";
 import { expandPath, settingsDir } from "./paths.ts";
@@ -37,6 +38,8 @@ function anyLayerExists(layers: ConfigLayers): boolean {
 
 export function installIntercept(opts: InterceptOptions): Intercept {
   const targets = buildTargets(opts);
+  // One warning per adapter, not one per intercepted read.
+  const warnedProjectLayer = new Set<string>();
   const dataDirs = dataTargets(opts.agentDir, opts.adapters);
   if (targets.size > 0 && !rawExistsSync(settingsDir(opts.agentDir))) {
     opts.onWarn?.(`unified settings dir missing: ${settingsDir(opts.agentDir)}`);
@@ -56,7 +59,20 @@ export function installIntercept(opts: InterceptOptions): Intercept {
     const adapter = targets.get(p);
     if (!adapter) return undefined;
     // Recompute from the live opts so session_start moving the cwd is honored.
-    return configLayers(opts, adapter);
+    const layers = configLayers(opts, adapter);
+    if (layers && layers.project === undefined && adapter.config?.projectOverride) {
+      // Our trust/cwd refresh runs from our own session_start handler, which is not
+      // guaranteed to run before another extension reads config. Say so instead of
+      // silently ignoring an override the user wrote.
+      const candidate = expandPath(join(opts.cwd, ".pi/unify", adapter.config.projectOverride), opts.agentDir);
+      if (rawExistsSync(candidate) && !warnedProjectLayer.has(adapter.name)) {
+        warnedProjectLayer.add(adapter.name);
+        opts.onWarn?.(
+          `project override for ${adapter.name} present at ${candidate} but not applied (project not reported trusted yet)`,
+        );
+      }
+    }
+    return layers;
   };
 
   // Render the merged view in the shape the caller asked for: a string for a
