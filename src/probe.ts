@@ -15,6 +15,10 @@ let saved: {
   readFileSync?: typeof fsDefault.readFileSync;
   promisesReadFile?: typeof fsDefault.promises.readFile;
 } = {};
+let patched: {
+  readFileSync?: typeof fsDefault.readFileSync;
+  promisesReadFile?: typeof fsDefault.promises.readFile;
+} = {};
 
 function record(p: unknown): void {
   // Never throw on odd inputs: only plain string paths are resolvable later.
@@ -31,15 +35,18 @@ export function installProbe(): void {
   const originalReadFileSync = saved.readFileSync;
   const originalPromisesReadFile = saved.promisesReadFile;
 
-  fsDefault.readFileSync = ((p: unknown, ...rest: unknown[]) => {
+  patched.readFileSync = ((p: unknown, ...rest: unknown[]) => {
     record(p);
     return (originalReadFileSync as Function)(p, ...rest);
   }) as typeof fsDefault.readFileSync;
 
-  fsDefault.promises.readFile = (async (p: unknown, ...rest: unknown[]) => {
+  patched.promisesReadFile = (async (p: unknown, ...rest: unknown[]) => {
     record(p);
     return (originalPromisesReadFile as Function)(p, ...rest);
   }) as typeof fsDefault.promises.readFile;
+
+  fsDefault.readFileSync = patched.readFileSync;
+  fsDefault.promises.readFile = patched.promisesReadFile;
 
   // Named ESM imports snapshot builtin exports before we load; resync so those
   // bindings reach the probe too (see the comment in src/fs-intercept.ts).
@@ -49,9 +56,15 @@ export function installProbe(): void {
 export function uninstallProbe(): void {
   if (!installed) return;
   installed = false;
-  if (saved.readFileSync) fsDefault.readFileSync = saved.readFileSync;
-  if (saved.promisesReadFile) fsDefault.promises.readFile = saved.promisesReadFile;
+  // Only while still ours: another interceptor may have patched on top, and its
+  // patch must survive (index.ts uninstalls the probe right after installing the
+  // intercept, whose chain still includes this wrapper, so it skips here).
+  if (saved.readFileSync && fsDefault.readFileSync === patched.readFileSync) fsDefault.readFileSync = saved.readFileSync;
+  if (saved.promisesReadFile && fsDefault.promises.readFile === patched.promisesReadFile) {
+    fsDefault.promises.readFile = saved.promisesReadFile;
+  }
   saved = {};
+  patched = {};
   syncBuiltinESMExports();
 }
 

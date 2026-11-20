@@ -19,15 +19,13 @@ export function withBypass<T>(fn: () => T): T {
   }
 }
 
-// Path whitelist for exact absolute config paths -> its config layers.
-// Data-dir mapping is added by a later ticket; keep that decision here only.
-function buildTargets(opts: InterceptOptions): Map<string, ConfigLayers> {
-  const targets = new Map<string, ConfigLayers>();
+// Path whitelist for exact absolute config paths -> the adapter that declared it.
+// Layers are resolved per call in resolveTarget, from the current cwd and trust.
+function buildTargets(opts: InterceptOptions): Map<string, InterceptOptions["adapters"][number]> {
+  const targets = new Map<string, InterceptOptions["adapters"][number]>();
   for (const adapter of opts.adapters) {
-    // Paths are built trust-blind; trust is applied per call in resolveTarget.
-    const layers = configLayers({ ...opts, projectTrusted: true }, adapter);
-    if (!layers || !adapter.config) continue;
-    targets.set(expandPath(adapter.config.path, opts.agentDir), layers);
+    if (!adapter.config) continue;
+    targets.set(expandPath(adapter.config.path, opts.agentDir), adapter);
   }
   return targets;
 }
@@ -55,9 +53,10 @@ export function installIntercept(opts: InterceptOptions): Intercept {
   const resolveTarget = (p: unknown): ConfigLayers | undefined => {
     if (bypassDepth > 0) return undefined;
     if (typeof p !== "string") return undefined;
-    const layers = targets.get(p);
-    if (!layers) return undefined;
-    return opts.projectTrusted || layers.project === undefined ? layers : { global: layers.global };
+    const adapter = targets.get(p);
+    if (!adapter) return undefined;
+    // Recompute from the live opts so session_start moving the cwd is honored.
+    return configLayers(opts, adapter);
   };
 
   // Render the merged view in the shape the caller asked for: a string for a
@@ -246,19 +245,21 @@ export function installIntercept(opts: InterceptOptions): Intercept {
     uninstall() {
       if (!installed) return;
       installed = false;
-      fsDefault.readFileSync = original.readFileSync;
-      fsDefault.existsSync = original.existsSync;
-      fsDefault.statSync = original.statSync;
-      fsDefault.writeFileSync = original.writeFileSync;
-      fsDefault.mkdirSync = original.mkdirSync;
-      fsDefault.readdirSync = original.readdirSync;
-      fsDefault.rmSync = original.rmSync;
-      fsDefault.promises.readFile = original.promisesReadFile;
-      fsDefault.promises.stat = original.promisesStat;
-      fsDefault.promises.writeFile = original.promisesWriteFile;
-      fsDefault.promises.readdir = original.promisesReaddir;
-      fsDefault.promises.mkdir = original.promisesMkdir;
-      fsDefault.promises.rm = original.promisesRm;
+      // Restore each slot only while it is still ours: a patch installed after
+      // us must survive, or we would silently disable another interceptor.
+      if (fsDefault.readFileSync === patched.readFileSync) fsDefault.readFileSync = original.readFileSync;
+      if (fsDefault.existsSync === patched.existsSync) fsDefault.existsSync = original.existsSync;
+      if (fsDefault.statSync === patched.statSync) fsDefault.statSync = original.statSync;
+      if (fsDefault.writeFileSync === patched.writeFileSync) fsDefault.writeFileSync = original.writeFileSync;
+      if (fsDefault.mkdirSync === patched.mkdirSync) fsDefault.mkdirSync = original.mkdirSync;
+      if (fsDefault.readdirSync === patched.readdirSync) fsDefault.readdirSync = original.readdirSync;
+      if (fsDefault.rmSync === patched.rmSync) fsDefault.rmSync = original.rmSync;
+      if (fsDefault.promises.readFile === patched.promisesReadFile) fsDefault.promises.readFile = original.promisesReadFile;
+      if (fsDefault.promises.stat === patched.promisesStat) fsDefault.promises.stat = original.promisesStat;
+      if (fsDefault.promises.writeFile === patched.promisesWriteFile) fsDefault.promises.writeFile = original.promisesWriteFile;
+      if (fsDefault.promises.readdir === patched.promisesReaddir) fsDefault.promises.readdir = original.promisesReaddir;
+      if (fsDefault.promises.mkdir === patched.promisesMkdir) fsDefault.promises.mkdir = original.promisesMkdir;
+      if (fsDefault.promises.rm === patched.promisesRm) fsDefault.promises.rm = original.promisesRm;
       syncBuiltinESMExports();
     },
     health() {

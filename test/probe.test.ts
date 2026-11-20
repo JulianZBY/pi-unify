@@ -105,3 +105,18 @@ test("self-check result is stored and returned as a copy", () => {
   assert.deepEqual(selfCheck(), { hits: ["/a.json"], ok: false });
   setSelfCheck({ hits: [], ok: true });
 });
+
+// Regression: uninstalling the probe clobbered a patch installed after it.
+test("a foreign patch installed after the probe survives its uninstall", (t) => {
+  const sb = sandbox(t);
+  t.after(() => uninstallProbe());
+  installProbe();
+  const ours = fs.readFileSync;
+  const foreign = ((...args: Parameters<typeof fs.readFileSync>) => (ours as Function)(...args)) as typeof fs.readFileSync;
+  fs.readFileSync = foreign;
+
+  uninstallProbe();
+  assert.equal(fs.readFileSync, foreign);
+  assert.equal(readFileSync(sb.oldConfig, "utf8"), '{"a":1}');
+  fs.readFileSync = ours;
+});

@@ -90,3 +90,37 @@ test("session_start stays silent without pre-interception hits, even with no UI"
 
 // Keeps the probe from leaking into later tests in this file.
 test.after(() => uninstallProbe());
+
+// Regression: rejected config writes only landed in an internal array, so users
+// never saw that a plugin's write had been refused.
+test("session_start surfaces rejected config writes once per batch", async (t) => {
+  const sb = sandbox(t, true);
+  const settings = join(sb.ad, "extensions/settings");
+  mkdirSync(settings, { recursive: true });
+  const globalConfig = join(settings, "pi-demo.json");
+  writeFileSync(globalConfig, JSON.stringify({ known: true }));
+  clearProbe();
+
+  const { api, handlers } = fakePi();
+  piUnify(api);
+  const start = handlers.get("session_start");
+  assert.ok(start);
+
+  const seen: Array<{ message: string; type?: string }> = [];
+  await start({}, ctx(sb.cwd, seen));
+  assert.deepEqual(seen, []);
+
+  readFileSync(sb.oldConfig, "utf8");
+  const fs = await import("node:fs");
+  fs.writeFileSync(sb.oldConfig, JSON.stringify({ known: true, surprise: 1 }));
+
+  await start({}, ctx(sb.cwd, seen));
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].type, "warning");
+  assert.match(seen[0].message, /1 config write\(s\) rejected/);
+  assert.match(seen[0].message, /\/unify/);
+
+  // No new rejection: no repeated notification.
+  await start({}, ctx(sb.cwd, seen));
+  assert.equal(seen.length, 1);
+});

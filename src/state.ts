@@ -28,6 +28,9 @@ export function readState(agentDir: string): MigrationState {
 
 export function writeState(agentDir: string, state: MigrationState): void {
   const path = statePath(agentDir);
+  const tmp = `${path}.tmp`;
   fs.mkdirSync(dirname(path), { recursive: true });
-  fs.writeFileSync(path, JSON.stringify(state, null, 2) + "\n");
+  // Temp + rename: a crash cannot truncate the file holding every record.
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n");
+  fs.renameSync(tmp, path);
 }

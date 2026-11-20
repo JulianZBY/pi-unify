@@ -87,8 +87,14 @@ export function writeConfig(layers: ConfigLayers, data: string | Uint8Array, onW
       }
     }
   }
+  // Merge over the global file so a partial write cannot drop untouched keys.
+  // An explicit {} over a populated file is treated as a bad write, not a wipe.
+  const global = readJsonObject(layers.global) ?? {};
+  if (Object.keys(next).length === 0 && Object.keys(global).length > 0) {
+    return reject("refusing to write an empty object over a populated config");
+  }
   mkdirSync(dirname(layers.global), { recursive: true });
-  rawWriteFileSync(layers.global, data);
+  rawWriteFileSync(layers.global, JSON.stringify({ ...global, ...next }));
   return true;
 }
 
