@@ -1,7 +1,7 @@
 // First import on purpose: evaluating ./probe.ts installs the read probe, which
 // must happen before any adapter or plugin work below.
 import "./probe.ts";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadAdapters } from "./adapters.ts";
 import { diagnose } from "./diagnose.ts";
 import { eject } from "./eject.ts";
@@ -26,7 +26,7 @@ export default function piUnify(pi: ExtensionAPI): void {
   const warnings: string[] = [];
   let rejectedWrites = 0;
   let notifiedRejected = 0;
-  const { adapters, warnings: loadWarnings } = loadAdapters(ad, [join(import.meta.dirname, "../adapters")]);
+  const { adapters, warnings: loadWarnings } = loadAdapters(ad, [fileURLToPath(new URL("../adapters", import.meta.url))]);
   warnings.push(...loadWarnings);
   const options: InterceptOptions = {
     agentDir: ad,
