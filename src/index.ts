@@ -6,7 +6,7 @@ import { loadAdapters } from "./adapters.ts";
 import { installIntercept } from "./fs-intercept.ts";
 import { agentDir } from "./paths.ts";
 import { earlyReads, selfCheck, setSelfCheck } from "./probe.ts";
-import type { ExtensionAPI } from "./types.ts";
+import type { ExtensionAPI, InterceptOptions } from "./types.ts";
 
 function selfCheckMessage(hits: string[]): string {
   return (
@@ -22,18 +22,22 @@ export default function piUnify(pi: ExtensionAPI): void {
   const warnings: string[] = [];
   const { adapters, warnings: loadWarnings } = loadAdapters(ad, [join(import.meta.dirname, "../adapters")]);
   warnings.push(...loadWarnings);
-  const intercept = installIntercept({
+  const options: InterceptOptions = {
     agentDir: ad,
     adapters,
     cwd: process.cwd(),
     projectTrusted: false,
     onWarn: (msg) => warnings.push(msg),
-  });
+  };
+  const intercept = installIntercept(options);
 
   const hits = earlyReads(adapters, ad);
   setSelfCheck({ hits, ok: hits.length === 0 });
 
   pi.on("session_start", (_event, ctx) => {
+    // Project overrides are only read once the host reports the project trusted;
+    // the intercept re-reads this flag per call, so no second patch is needed.
+    options.projectTrusted = ctx.isProjectTrusted();
     if (!ctx.hasUI || hits.length === 0) return;
     ctx.ui.notify(selfCheckMessage(hits), "warning");
   });

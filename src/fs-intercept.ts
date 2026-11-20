@@ -1,20 +1,26 @@
 import fsDefault from "node:fs";
-import { existsSync as rawExistsSync, mkdirSync } from "node:fs";
+import { existsSync as rawExistsSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { dirname } from "node:path";
+import { configLayers, readConfig, writeConfig, type ConfigLayers } from "./config.ts";
 import { expandPath, settingsDir } from "./paths.ts";
 import type { Intercept, InterceptOptions } from "./types.ts";
 
-// Path whitelist for exact absolute config paths -> unified settings file.
+// Path whitelist for exact absolute config paths -> its config layers.
 // Data-dir mapping is added by a later ticket; keep that decision here only.
-function buildTargets(opts: InterceptOptions): Map<string, string> {
-  const targets = new Map<string, string>();
+function buildTargets(opts: InterceptOptions): Map<string, ConfigLayers> {
+  const targets = new Map<string, ConfigLayers>();
   for (const adapter of opts.adapters) {
-    if (!adapter.config) continue;
-    const oldPath = expandPath(adapter.config.path, opts.agentDir);
-    targets.set(oldPath, `${settingsDir(opts.agentDir)}/${adapter.name}.json`);
+    // Paths are built trust-blind; trust is applied per call in resolveTarget.
+    const layers = configLayers({ ...opts, projectTrusted: true }, adapter);
+    if (!layers || !adapter.config) continue;
+    targets.set(expandPath(adapter.config.path, opts.agentDir), layers);
   }
   return targets;
+}
+
+// A whitelisted path counts as existing when any of its layers does.
+function anyLayerExists(layers: ConfigLayers): boolean {
+  return rawExistsSync(layers.global) || (layers.project !== undefined && rawExistsSync(layers.project));
 }
 
 export function installIntercept(opts: InterceptOptions): Intercept {
@@ -25,8 +31,32 @@ export function installIntercept(opts: InterceptOptions): Intercept {
 
   // One place deciding where a whitelisted path really lives. Undefined means
   // "not whitelisted": every patched function then calls the saved original.
-  const resolveTarget = (p: unknown): string | undefined =>
-    typeof p === "string" ? targets.get(p) : undefined;
+  // Trust is read per call so a session_start update takes effect without re-patching.
+  const resolveTarget = (p: unknown): ConfigLayers | undefined => {
+    if (typeof p !== "string") return undefined;
+    const layers = targets.get(p);
+    if (!layers) return undefined;
+    return opts.projectTrusted || layers.project === undefined ? layers : { global: layers.global };
+  };
+
+  // Render the merged view in the shape the caller asked for: a string for a
+  // requested encoding, a Buffer otherwise (same as the original readFileSync).
+  // No parseable layer means the file is not JSON: serve that raw file so
+  // plugins with plain-text/legacy config keep working.
+  const readWhitelisted = (read: Function, layers: ConfigLayers, p: string, args: unknown[]) => {
+    const view = readConfig(layers);
+    if (!view) {
+      const raw = rawExistsSync(layers.global)
+        ? layers.global
+        : layers.project !== undefined && rawExistsSync(layers.project)
+          ? layers.project
+          : p;
+      return read(raw, ...args);
+    }
+    const json = JSON.stringify(view.merged);
+    const requested = typeof args[0] === "string" ? args[0] : (args[0] as { encoding?: BufferEncoding } | undefined)?.encoding;
+    return requested ? json : Buffer.from(json);
+  };
 
   const original = {
     readFileSync: fsDefault.readFileSync,
@@ -40,50 +70,60 @@ export function installIntercept(opts: InterceptOptions): Intercept {
 
   const patched = {
     readFileSync: ((p: unknown, ...rest: unknown[]) => {
-      const target = resolveTarget(p);
-      if (target && rawExistsSync(target)) return (original.readFileSync as Function)(target, ...rest);
+      const layers = resolveTarget(p);
+      if (layers && anyLayerExists(layers)) return readWhitelisted(original.readFileSync, layers, p as string, rest);
       return (original.readFileSync as Function)(p, ...rest);
     }) as typeof fsDefault.readFileSync,
 
     existsSync: ((p: unknown) => {
-      const target = resolveTarget(p);
-      if (target && rawExistsSync(target)) return true;
+      const layers = resolveTarget(p);
+      if (layers && anyLayerExists(layers)) return true;
       return (original.existsSync as Function)(p);
     }) as typeof fsDefault.existsSync,
 
     statSync: ((p: unknown, ...rest: unknown[]) => {
-      const target = resolveTarget(p);
-      if (target && rawExistsSync(target)) return (original.statSync as Function)(target, ...rest);
+      const layers = resolveTarget(p);
+      if (layers && anyLayerExists(layers)) {
+        // shortcut: stat reports the global file, so size != merged size when the
+        // project layer adds keys; upgrade if a caller ever trusts stat().size.
+        const existing = rawExistsSync(layers.global) ? layers.global : (layers.project as string);
+        return (original.statSync as Function)(existing, ...rest);
+      }
       return (original.statSync as Function)(p, ...rest);
     }) as typeof fsDefault.statSync,
 
-    // TODO(ticket 03): config writes will be merged/validated in src/config.ts.
+    // Writes always land in the global layer, after src/config.ts validates them.
+    // shortcut: write options (mode/flag) are dropped; plugin config writes are
+    // whole-file replaces. Upgrade if a plugin appends to its config file.
     writeFileSync: ((p: unknown, ...rest: unknown[]) => {
-      const target = resolveTarget(p);
-      if (target) {
-        mkdirSync(dirname(target), { recursive: true });
-        return (original.writeFileSync as Function)(target, ...rest);
+      const layers = resolveTarget(p);
+      if (layers) {
+        writeConfig(layers, rest[0] as string | Uint8Array, opts.onWarn);
+        return;
       }
       return (original.writeFileSync as Function)(p, ...rest);
     }) as typeof fsDefault.writeFileSync,
 
     promisesReadFile: (async (p: unknown, ...rest: unknown[]) => {
-      const target = resolveTarget(p);
-      if (target && rawExistsSync(target)) return (original.promisesReadFile as Function)(target, ...rest);
+      const layers = resolveTarget(p);
+      if (layers && anyLayerExists(layers)) return readWhitelisted(original.promisesReadFile, layers, p as string, rest);
       return (original.promisesReadFile as Function)(p, ...rest);
     }) as typeof fsDefault.promises.readFile,
 
     promisesStat: (async (p: unknown, ...rest: unknown[]) => {
-      const target = resolveTarget(p);
-      if (target && rawExistsSync(target)) return (original.promisesStat as Function)(target, ...rest);
+      const layers = resolveTarget(p);
+      if (layers && anyLayerExists(layers)) {
+        const existing = rawExistsSync(layers.global) ? layers.global : (layers.project as string);
+        return (original.promisesStat as Function)(existing, ...rest);
+      }
       return (original.promisesStat as Function)(p, ...rest);
     }) as typeof fsDefault.promises.stat,
 
     promisesWriteFile: (async (p: unknown, ...rest: unknown[]) => {
-      const target = resolveTarget(p);
-      if (target) {
-        mkdirSync(dirname(target), { recursive: true });
-        return (original.promisesWriteFile as Function)(target, ...rest);
+      const layers = resolveTarget(p);
+      if (layers) {
+        writeConfig(layers, rest[0] as string | Uint8Array, opts.onWarn);
+        return;
       }
       return (original.promisesWriteFile as Function)(p, ...rest);
     }) as typeof fsDefault.promises.writeFile,
