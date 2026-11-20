@@ -4,16 +4,15 @@
 
 **Blocked by:** 03, 04, 07.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 6 份 adapter 描述单随包提供，路径与各插件实际布局核对过
-- [ ] 至少一个真实插件完成端到端迁移验证（建议 pi-caveman 当小白鼠）
-- [ ] README 覆盖：安装、加载顺序要求、迁移、eject、项目覆盖写法
-- [ ] ponytail、pi-ask-user 在文档中明确列为不适用（无独立配置）
+- [x] 6 份 adapter 描述单随包提供，路径与各插件实际布局核对过
+- [x] 至少一个真实插件完成端到端迁移验证（建议 pi-caveman 当小白鼠）
+- [x] README 覆盖：安装、加载顺序要求、迁移、eject、项目覆盖写法
+- [x] ponytail、pi-ask-user 在文档中明确列为不适用（无独立配置）
 
 ## Answer
 
-**Status:** resolved
 
 - [x] 6 份 adapter 描述单随包提供，路径与各插件实际布局核对过
 - [x] 至少一个真实插件完成端到端迁移验证（pi-caveman）

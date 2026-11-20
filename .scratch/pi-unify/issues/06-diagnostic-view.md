@@ -4,16 +4,15 @@
 
 **Blocked by:** 03, 04, 05.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 命令列出全部已加载 adapter 的插件
-- [ ] 每个配置值标注来源层
-- [ ] 重定向状态异常（如目标缺失）可见
-- [ ] 自检告警在视图中展示
+- [x] 命令列出全部已加载 adapter 的插件
+- [x] 每个配置值标注来源层
+- [x] 重定向状态异常（如目标缺失）可见
+- [x] 自检告警在视图中展示
 
 ## Answer
 
-**Status:** resolved
 
 - [x] 命令列出全部已加载 adapter 的插件
 - [x] 每个配置值标注来源层
