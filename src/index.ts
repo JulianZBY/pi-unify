@@ -38,6 +38,7 @@ export default function piUnify(pi: ExtensionAPI): void {
     // Project overrides are only read once the host reports the project trusted;
     // the intercept re-reads this flag per call, so no second patch is needed.
     options.projectTrusted = ctx.isProjectTrusted();
+    options.cwd = ctx.cwd;
     if (!ctx.hasUI || hits.length === 0) return;
     ctx.ui.notify(selfCheckMessage(hits), "warning");
   });
