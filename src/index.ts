@@ -4,6 +4,7 @@ import "./probe.ts";
 import { join } from "node:path";
 import { loadAdapters } from "./adapters.ts";
 import { installIntercept } from "./fs-intercept.ts";
+import { migrate } from "./migrate.ts";
 import { agentDir } from "./paths.ts";
 import { earlyReads, selfCheck, setSelfCheck } from "./probe.ts";
 import type { ExtensionAPI, InterceptOptions } from "./types.ts";
@@ -53,6 +54,14 @@ export default function piUnify(pi: ExtensionAPI): void {
       const problemsPart = problems.length ? `; ${problems.length} problem(s)` : "";
       const selfCheckPart = checked.ok ? "" : `; ${checked.hits.length} adopted config file(s) read before interception`;
       ctx.ui.notify(`${summary}${problemsPart}${selfCheckPart}`, "info");
+    },
+  });
+
+  pi.registerCommand("unify:migrate", {
+    description: "Back up and move one plugin's old config and data into the unified layout",
+    handler: async (args, ctx) => {
+      const result = migrate(args, { agentDir: ad, adapters });
+      ctx.ui.notify(result.message, result.ok ? "info" : "error");
     },
   });
 }
