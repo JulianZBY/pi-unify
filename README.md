@@ -74,12 +74,14 @@ always land in the global file `extensions/settings/<plugin>.json`.
 
 - `/unify` — status: adopted plugins, per-key layer (`global`/`project`),
   migration state, and intercept health / self-check result.
-- `/unify:migrate <plugin>` — back up every old file, move it into the unified
+- `/unify:migrate [plugin]` — back up every old file, move it into the unified
   layout, record the migration. Idempotent: a second run reports "already
   migrated" and touches nothing. Unknown names and failures leave everything in
-  place and name the backup directory.
-- `/unify:eject <plugin>` — reverse migration: restore the old layout from the
-  recorded `from`/`to` pairs. Backups are kept.
+  place and name the backup directory. **Omit the name to migrate every adapter**
+  in one go (already-adopted ones are skipped, a failure does not stop the rest).
+- `/unify:eject [plugin]` — reverse migration: restore the old layout from the
+  recorded `from`/`to` pairs. Backups are kept. Omit the name to eject every
+  migrated plugin — that is the step to run before uninstalling pi-unify.
 
 Config is read at extension load. Changing config or the `packages` order needs a
 restart or `/reload`; there is no hot reload.
