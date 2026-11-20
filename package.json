@@ -1,0 +1,30 @@
+{
+  "name": "pi-unify",
+  "version": "0.1.0",
+  "description": "Gather pi plugin config and data under one directory by intercepting filesystem calls",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "files": [
+    "src",
+    "adapters",
+    "README.md"
+  ]
+}
