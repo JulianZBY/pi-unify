@@ -1,7 +1,8 @@
 import fsDefault from "node:fs";
-import { existsSync as rawExistsSync } from "node:fs";
+import { existsSync as rawExistsSync, mkdirSync as rawMkdirSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { configLayers, readConfig, writeConfig, type ConfigLayers } from "./config.ts";
+import { dataHealth, dataTargets, matchDataPath, parentDir, preferUnified, writePath } from "./data-dir.ts";
 import { expandPath, settingsDir } from "./paths.ts";
 import type { Intercept, InterceptOptions } from "./types.ts";
 
@@ -25,9 +26,15 @@ function anyLayerExists(layers: ConfigLayers): boolean {
 
 export function installIntercept(opts: InterceptOptions): Intercept {
   const targets = buildTargets(opts);
+  const dataDirs = dataTargets(opts.agentDir, opts.adapters);
   if (targets.size > 0 && !rawExistsSync(settingsDir(opts.agentDir))) {
     opts.onWarn?.(`unified settings dir missing: ${settingsDir(opts.agentDir)}`);
   }
+
+  // Config wins over data: a declared config path that happens to sit inside a
+  // declared data dir is served as config, because that is the narrower contract
+  // the plugin declared. Each patch therefore checks config targets first and
+  // only consults data dirs when the path is not a config path.
 
   // One place deciding where a whitelisted path really lives. Undefined means
   // "not whitelisted": every patched function then calls the saved original.
@@ -58,28 +65,62 @@ export function installIntercept(opts: InterceptOptions): Intercept {
     return requested ? json : Buffer.from(json);
   };
 
+  const dataPath = (p: unknown) => (resolveTarget(p) ? undefined : matchDataPath(dataDirs, p));
+  // Writes and directory creation always go to the unified side, creating the
+  // parent dir; deletes follow the read side so an unmigrated old dir can still
+  // be removed where it currently lives.
+  const ensureParent = (dir: string) => rawMkdirSync(dir, { recursive: true });
+
   const original = {
     readFileSync: fsDefault.readFileSync,
     existsSync: fsDefault.existsSync,
     statSync: fsDefault.statSync,
     writeFileSync: fsDefault.writeFileSync,
+    mkdirSync: fsDefault.mkdirSync,
+    readdirSync: fsDefault.readdirSync,
+    rmSync: fsDefault.rmSync,
     promisesReadFile: fsDefault.promises.readFile,
     promisesStat: fsDefault.promises.stat,
     promisesWriteFile: fsDefault.promises.writeFile,
+    promisesMkdir: fsDefault.promises.mkdir,
+    promisesReaddir: fsDefault.promises.readdir,
+    promisesRm: fsDefault.promises.rm,
   } as const;
 
   const patched = {
     readFileSync: ((p: unknown, ...rest: unknown[]) => {
       const layers = resolveTarget(p);
       if (layers && anyLayerExists(layers)) return readWhitelisted(original.readFileSync, layers, p as string, rest);
+      const dp = dataPath(p);
+      if (dp) return (original.readFileSync as Function)(preferUnified(dp), ...rest);
       return (original.readFileSync as Function)(p, ...rest);
     }) as typeof fsDefault.readFileSync,
 
     existsSync: ((p: unknown) => {
       const layers = resolveTarget(p);
       if (layers && anyLayerExists(layers)) return true;
+      const dp = dataPath(p);
+      if (dp) return (original.existsSync as Function)(preferUnified(dp));
       return (original.existsSync as Function)(p);
     }) as typeof fsDefault.existsSync,
+
+    mkdirSync: ((p: unknown, ...rest: unknown[]) => {
+      const dp = dataPath(p);
+      if (dp) return (original.mkdirSync as Function)(writePath(dp), ...rest);
+      return (original.mkdirSync as Function)(p, ...rest);
+    }) as typeof fsDefault.mkdirSync,
+
+    readdirSync: ((p: unknown, ...rest: unknown[]) => {
+      const dp = dataPath(p);
+      if (dp) return (original.readdirSync as Function)(preferUnified(dp), ...rest);
+      return (original.readdirSync as Function)(p, ...rest);
+    }) as typeof fsDefault.readdirSync,
+
+    rmSync: ((p: unknown, ...rest: unknown[]) => {
+      const dp = dataPath(p);
+      if (dp) return (original.rmSync as Function)(preferUnified(dp), ...rest);
+      return (original.rmSync as Function)(p, ...rest);
+    }) as typeof fsDefault.rmSync,
 
     statSync: ((p: unknown, ...rest: unknown[]) => {
       const layers = resolveTarget(p);
@@ -89,6 +130,8 @@ export function installIntercept(opts: InterceptOptions): Intercept {
         const existing = rawExistsSync(layers.global) ? layers.global : (layers.project as string);
         return (original.statSync as Function)(existing, ...rest);
       }
+      const dp = dataPath(p);
+      if (dp) return (original.statSync as Function)(preferUnified(dp), ...rest);
       return (original.statSync as Function)(p, ...rest);
     }) as typeof fsDefault.statSync,
 
@@ -101,14 +144,39 @@ export function installIntercept(opts: InterceptOptions): Intercept {
         writeConfig(layers, rest[0] as string | Uint8Array, opts.onWarn);
         return;
       }
+      const dp = dataPath(p);
+      if (dp) {
+        ensureParent(parentDir(dp));
+        return (original.writeFileSync as Function)(writePath(dp), ...rest);
+      }
       return (original.writeFileSync as Function)(p, ...rest);
     }) as typeof fsDefault.writeFileSync,
 
     promisesReadFile: (async (p: unknown, ...rest: unknown[]) => {
       const layers = resolveTarget(p);
       if (layers && anyLayerExists(layers)) return readWhitelisted(original.promisesReadFile, layers, p as string, rest);
+      const dp = dataPath(p);
+      if (dp) return (original.promisesReadFile as Function)(preferUnified(dp), ...rest);
       return (original.promisesReadFile as Function)(p, ...rest);
     }) as typeof fsDefault.promises.readFile,
+
+    promisesReaddir: (async (p: unknown, ...rest: unknown[]) => {
+      const dp = dataPath(p);
+      if (dp) return (original.promisesReaddir as Function)(preferUnified(dp), ...rest);
+      return (original.promisesReaddir as Function)(p, ...rest);
+    }) as typeof fsDefault.promises.readdir,
+
+    promisesMkdir: (async (p: unknown, ...rest: unknown[]) => {
+      const dp = dataPath(p);
+      if (dp) return (original.promisesMkdir as Function)(writePath(dp), ...rest);
+      return (original.promisesMkdir as Function)(p, ...rest);
+    }) as typeof fsDefault.promises.mkdir,
+
+    promisesRm: (async (p: unknown, ...rest: unknown[]) => {
+      const dp = dataPath(p);
+      if (dp) return (original.promisesRm as Function)(preferUnified(dp), ...rest);
+      return (original.promisesRm as Function)(p, ...rest);
+    }) as typeof fsDefault.promises.rm,
 
     promisesStat: (async (p: unknown, ...rest: unknown[]) => {
       const layers = resolveTarget(p);
@@ -116,6 +184,8 @@ export function installIntercept(opts: InterceptOptions): Intercept {
         const existing = rawExistsSync(layers.global) ? layers.global : (layers.project as string);
         return (original.promisesStat as Function)(existing, ...rest);
       }
+      const dp = dataPath(p);
+      if (dp) return (original.promisesStat as Function)(preferUnified(dp), ...rest);
       return (original.promisesStat as Function)(p, ...rest);
     }) as typeof fsDefault.promises.stat,
 
@@ -124,6 +194,11 @@ export function installIntercept(opts: InterceptOptions): Intercept {
       if (layers) {
         writeConfig(layers, rest[0] as string | Uint8Array, opts.onWarn);
         return;
+      }
+      const dp = dataPath(p);
+      if (dp) {
+        ensureParent(parentDir(dp));
+        return (original.promisesWriteFile as Function)(writePath(dp), ...rest);
       }
       return (original.promisesWriteFile as Function)(p, ...rest);
     }) as typeof fsDefault.promises.writeFile,
@@ -135,9 +210,15 @@ export function installIntercept(opts: InterceptOptions): Intercept {
   fsDefault.existsSync = patched.existsSync;
   fsDefault.statSync = patched.statSync;
   fsDefault.writeFileSync = patched.writeFileSync;
+  fsDefault.mkdirSync = patched.mkdirSync;
+  fsDefault.readdirSync = patched.readdirSync;
+  fsDefault.rmSync = patched.rmSync;
   fsDefault.promises.readFile = patched.promisesReadFile;
   fsDefault.promises.stat = patched.promisesStat;
   fsDefault.promises.writeFile = patched.promisesWriteFile;
+  fsDefault.promises.readdir = patched.promisesReaddir;
+  fsDefault.promises.mkdir = patched.promisesMkdir;
+  fsDefault.promises.rm = patched.promisesRm;
   // Named ESM imports (`import { readFileSync } from "node:fs"`) snapshot the
   // builtin's exports at first instantiation, which happens long before an
   // extension loads. Re-syncing is the only way those bindings see our patch —
@@ -154,9 +235,15 @@ export function installIntercept(opts: InterceptOptions): Intercept {
       fsDefault.existsSync = original.existsSync;
       fsDefault.statSync = original.statSync;
       fsDefault.writeFileSync = original.writeFileSync;
+      fsDefault.mkdirSync = original.mkdirSync;
+      fsDefault.readdirSync = original.readdirSync;
+      fsDefault.rmSync = original.rmSync;
       fsDefault.promises.readFile = original.promisesReadFile;
       fsDefault.promises.stat = original.promisesStat;
       fsDefault.promises.writeFile = original.promisesWriteFile;
+      fsDefault.promises.readdir = original.promisesReaddir;
+      fsDefault.promises.mkdir = original.promisesMkdir;
+      fsDefault.promises.rm = original.promisesRm;
       syncBuiltinESMExports();
     },
     health() {
@@ -168,9 +255,15 @@ export function installIntercept(opts: InterceptOptions): Intercept {
         ["existsSync", fsDefault.existsSync, patched.existsSync],
         ["statSync", fsDefault.statSync, patched.statSync],
         ["writeFileSync", fsDefault.writeFileSync, patched.writeFileSync],
+        ["mkdirSync", fsDefault.mkdirSync, patched.mkdirSync],
+        ["readdirSync", fsDefault.readdirSync, patched.readdirSync],
+        ["rmSync", fsDefault.rmSync, patched.rmSync],
         ["promises.readFile", fsDefault.promises.readFile, patched.promisesReadFile],
         ["promises.stat", fsDefault.promises.stat, patched.promisesStat],
         ["promises.writeFile", fsDefault.promises.writeFile, patched.promisesWriteFile],
+        ["promises.readdir", fsDefault.promises.readdir, patched.promisesReaddir],
+        ["promises.mkdir", fsDefault.promises.mkdir, patched.promisesMkdir],
+        ["promises.rm", fsDefault.promises.rm, patched.promisesRm],
       ] as const) {
         if (current === ours) patchedNames.push(name);
         else problems.push(`${name} is no longer our patch (another interceptor ran after us)`);
@@ -178,6 +271,7 @@ export function installIntercept(opts: InterceptOptions): Intercept {
       if (targets.size > 0 && !rawExistsSync(settingsDir(opts.agentDir))) {
         problems.push(`unified settings dir missing: ${settingsDir(opts.agentDir)}`);
       }
+      problems.push(...dataHealth(dataDirs));
       return { patched: patchedNames, problems };
     },
   };
