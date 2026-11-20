@@ -1,0 +1,4 @@
+{
+  "name": "pi-cc-extensions",
+  "config": { "path": "<agent>/pi-cc-extensions.json", "projectOverride": "pi-cc-extensions.json" }
+}

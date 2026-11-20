@@ -1,0 +1,4 @@
+{
+  "name": "pi-lens",
+  "config": { "path": "~/.pi-lens/config.json", "projectOverride": "pi-lens.json" }
+}

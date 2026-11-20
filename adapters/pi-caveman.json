@@ -1,0 +1,4 @@
+{
+  "name": "pi-caveman",
+  "config": { "path": "<agent>/caveman.json", "projectOverride": "caveman.json" }
+}
