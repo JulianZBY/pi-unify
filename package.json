@@ -4,7 +4,12 @@
   "description": "Gather pi plugin config and data under one directory by intercepting filesystem calls",
   "type": "module",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "config",
+    "dotfiles",
+    "filesystem"
   ],
   "pi": {
     "extensions": [
@@ -19,12 +24,26 @@
       "optional": true
     }
   },
-  "scripts": {
-    "test": "node --test test/*.test.ts"
-  },
   "files": [
     "src",
     "adapters",
     "README.md"
-  ]
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "prepublishOnly": "npm test"
+  },
+  "license": "MIT",
+  "author": "JulianZBY <JulianZBY@outlook.com>",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JulianZBY/pi-unify.git"
+  },
+  "homepage": "https://github.com/JulianZBY/pi-unify#readme",
+  "bugs": {
+    "url": "https://github.com/JulianZBY/pi-unify/issues"
+  }
 }

@@ -18,10 +18,11 @@ Two consequences worth knowing before you install:
 
 ## Install
 
-Local path install (until the package is published):
+Install:
 
 ```bash
-pi install /abs/path/to/pi-unify
+pi install npm:pi-unify          # once published
+pi install /abs/path/to/pi-unify # from a checkout
 ```
 
 This adds an entry to your pi settings `packages` array. If you write it by hand,
