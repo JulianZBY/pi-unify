@@ -1,3 +1,16 @@
+# dependencies
 node_modules/
+
+# build output
 dist/
+
+# packaged tarballs
 *.tgz
+
+# local noise
+*.log
+*.tmp
+.DS_Store
+.env
+.env.*
+coverage/
