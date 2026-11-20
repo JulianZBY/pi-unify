@@ -100,7 +100,7 @@ test("keys served from the old file are labelled default when no layer exists", 
   const lines = run(sb, { adapters: [adapter()] });
 
   assert.match(lineWith(lines, "no unified layer"), /demo\.json/);
-  assert.match(lineWith(lines, "temperature ="), /0\.5 \(source: default\)/);
+  assert.match(lineWith(lines, "temperature ="), /0\.5 \(source: old file — not migrated yet\)/);
 });
 
 test("a config-carrying adapter without any file reports built-in defaults instead of throwing", (t) => {

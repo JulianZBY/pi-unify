@@ -73,7 +73,7 @@ function configLines(input: DiagnoseInput, adapter: Adapter): string[] {
   if (!old) return [`    config layers: no unified layer yet, no old file at ${oldPath}${ignored}`];
   const lines = [`    config layers: no unified layer yet, old path still serves this plugin: ${oldPath}${ignored}`];
   for (const key of Object.keys(old).sort()) {
-    lines.push(`      ${key} = ${JSON.stringify(old[key])} (source: default)`);
+    lines.push(`      ${key} = ${JSON.stringify(old[key])} (source: old file — not migrated yet)`);
   }
   return lines;
 }
