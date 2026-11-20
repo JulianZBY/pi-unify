@@ -117,7 +117,20 @@ Notes on the table:
   plugin that reads its config that way still sees the old path.
 - pi-fff's data lives in LMDB directories opened by a native addon, which bypasses
   the in-process fs shim entirely: the addon reopens and recreates the old path even
-  after a migration. Its descriptor therefore declares the config file only.
+  after a migration. Its descriptor therefore declares the config file only. If you
+  want those databases under the unified root, point pi-fff at them itself — its own
+  config supports absolute paths:
+
+  ```jsonc
+  // extensions/settings/pi-fff.json
+  {
+    "frecencyDbPath": "/abs/path/.pi/agent/extensions/data/pi-fff/frecency",
+    "historyDbPath": "/abs/path/.pi/agent/extensions/data/pi-fff/history"
+  }
+  ```
+
+  That is the plugin's own configuration, not interception: no `~`, absolute paths
+  only, and moving the databases is a plain file move.
 
 ## Not applicable
 
